@@ -93,3 +93,4 @@ mm2src/*/CLAUDE.md
 
 # Claude Code configuration
 .claude
+scripts/elektron/__pycache__/

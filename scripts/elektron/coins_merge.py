@@ -71,7 +71,7 @@ def merge(upstream: list, overlay: list) -> list:
     for entry in upstream:
         merged[entry["coin"]] = entry
     for entry in overlay:
-        merged[entry["coin"]] = entry  # Overlay gewinnt pro Ticker
+        merged[entry["coin"]] = entry  # overlay wins per ticker
     return [merged[ticker] for ticker in sorted(merged)]
 
 
