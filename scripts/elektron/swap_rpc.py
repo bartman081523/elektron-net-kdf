@@ -64,8 +64,14 @@ def ensure_coins(port, password):
                 pass
             time.sleep(3)
         time.sleep(2)
+    # Superset semantics: an instance may already carry testnet coins
+    # (tELEK/tBTC from the phase-4 legs), activated interactively or
+    # restored from its own database -- the swap path only requires the
+    # regtest pair to be present.
     t = enabled_tickers(port, password)
-    assert t == {"rELEK", "rBTC"}, "coins not enabled: %s" % t
+    missing = {"rELEK", "rBTC"} - t
+    assert not missing, "coins not enabled: missing %s (have %s)" % (
+        sorted(missing), sorted(t))
     return t
 
 def balance(port, password, coin):

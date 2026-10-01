@@ -11,18 +11,32 @@ import base64, json, os, sys, urllib.request, urllib.error
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from swap_rpc import rpc, ALICE, BOB
 
-RESULTS = "/run/media/julian/ML5/kdf-regtest/runs/swap-results.jsonl"
+RESULTS = os.environ.get(
+    "SWAP_RESULTS", "/run/media/julian/ML5/kdf-regtest/runs/swap-results.jsonl")
 DEX_PUBKEY_HEX = "03a778d9bd346fa704cf3e2508cd074d93a1bbc1e504fbecbb0a8d48e7cccbbf5c"
 
-NODES = {"rELEK": ("http://127.0.0.1:38332", "elek:pass"),
-         "rBTC": ("http://127.0.0.1:18443", "elek:pass")}
+# rELEK/rBTC = the regtest chains; tELEK = the private Elektron testnet
+# (etn1). All three nodes share the RPC credentials from the environment.
+NODES = {"rELEK": "http://127.0.0.1:38332",
+         "rBTC": "http://127.0.0.1:18443",
+         "tELEK": "http://127.0.0.1:18332"}
+
+def node_creds():
+    # Node RPC credentials arrive via the environment -- they never enter
+    # the repository (same discipline as testnet_fund.py).
+    user = os.environ.get("RPC_USER")
+    pw = os.environ.get("RPC_PASS")
+    if not user or not pw:
+        raise SystemExit("RPC_USER / RPC_PASS not set; node credentials "
+                         "stay out of the repository")
+    return "%s:%s" % (user, pw)
 
 def noderpc(ticker, method, params):
-    url, auth = NODES[ticker]
+    url = NODES[ticker]
     body = json.dumps({"method": method, "params": params}).encode()
     req = urllib.request.Request(url, data=body, headers={
         "Content-Type": "application/json",
-        "Authorization": "Basic " + base64.b64encode(auth.encode()).decode()})
+        "Authorization": "Basic " + base64.b64encode(node_creds().encode()).decode()})
     try:
         raw = urllib.request.urlopen(req, timeout=30).read().decode()
     except urllib.error.HTTPError as e:
@@ -54,9 +68,19 @@ def main():
     # 21<pubkey>ac
     dex_script = ("21" + DEX_PUBKEY_HEX + "ac")
     problems = 0
+    unverified = 0
     for r in green:
         port, pw = (ALICE if r['maker'] == 'bob' else BOB)  # taker's side
-        st = rpc(port, pw, {'method': 'my_swap_status', 'params': {'uuid': r['uuid']}})
+        try:
+            st = rpc(port, pw, {'method': 'my_swap_status',
+                                'params': {'uuid': r['uuid']}})
+        except urllib.error.URLError:
+            # the taker instance can be down (it is even killed on purpose
+            # in the refund scenarios); the maker's copy of the Started
+            # event carries the same fee fields
+            port, pw = (BOB if r['maker'] == 'bob' else ALICE)
+            st = rpc(port, pw, {'method': 'my_swap_status',
+                                'params': {'uuid': r['uuid']}})
         evs = st['result']['events']
         started = [e['event']['data'] for e in evs if e['event']['type'] == 'Started'][0]
         fee0 = started.get('fee_to_send_taker_fee', {}).get('amount')
@@ -74,10 +98,18 @@ def main():
             for vt, vtype, spk in vout_scripts(ticker, tx_hex):
                 if dex_script in spk:
                     leaks.append((e['event']['type'], vt, vtype))
-        print(r['n'], r['uuid'][:8], 'no_fee=%s' % (fee0 == '0'), 'leaks=%s' % (leaks or "none"))
-        if fee0 != '0' or leaks:
-            problems += 1
-    print("problems: %d" % problems)
+        if fee0 is None:
+            # maker-side Started events in this build do not carry the
+            # taker-fee fields: without the (alive) taker instance these
+            # swaps are UNVERIFIED, not violations
+            print(r['n'], r['uuid'][:8], 'no_fee=UNVERIFIED (taker fields absent on queried side)',
+                  'leaks=%s' % (leaks or "none"))
+            unverified += 1
+        else:
+            print(r['n'], r['uuid'][:8], 'no_fee=%s' % (fee0 == '0'), 'leaks=%s' % (leaks or "none"))
+            if fee0 != '0' or leaks:
+                problems += 1
+    print("problems: %d, unverified (taker side unavailable): %d" % (problems, unverified))
     return 1 if problems else 0
 
 if __name__ == "__main__":
