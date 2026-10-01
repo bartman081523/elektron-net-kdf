@@ -84,9 +84,9 @@
     "coin": "rBTC",
     "name": "bitcoin-regtest",
     "fname": "Bitcoin (regtest, own elektrond instance)",
-    "pubtype": 0,
-    "p2shtype": 5,
-    "wiftype": 128,
+    "pubtype": 111,
+    "p2shtype": 196,
+    "wiftype": 239,
     "segwit": true,
     "bech32_hrp": "bcrt",
     "address_format": {
