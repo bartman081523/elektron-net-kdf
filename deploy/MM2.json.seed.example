@@ -1,0 +1,11 @@
+{
+  "passphrase": "<24-word seed phrase -- generate offline, never commit>",
+  "rpc_password": "<strong random rpc password>",
+  "netid": 2,
+  "gui": "elektron-net",
+  "rpcip": "127.0.0.1",
+  "rpcport": 7795,
+  "dbdir": "/home/<user>/.local/share/kdf/seed/db",
+  "is_bootstrap_node": true,
+  "i_am_seed": true
+}

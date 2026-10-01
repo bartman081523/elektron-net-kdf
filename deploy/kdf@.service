@@ -1,0 +1,15 @@
+[Unit]
+Description=kdf (Komodo DeFi Framework, Elektron Net fork, instance %i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# per-instance EnvironmentFile: ~/.config/kdf/%i.env defines
+# KDF_BIN, RUST_LOG, MM_LOG, MM_COINS_PATH, MM_CONF_PATH
+EnvironmentFile=%h/.config/kdf/%i.env
+ExecStart=${KDF_BIN}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

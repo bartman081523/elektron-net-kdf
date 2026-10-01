@@ -1,0 +1,21 @@
+#!/usr/sbin/nft -f
+# Elektron Net kdf deployment: only the seed node's P2P port accepts
+# connections, and only from LAN/Tailnet. RPC ports bind 127.0.0.1
+# (rpcip in MM2.json) and need no firewall rule.
+#
+# netid 2 ports (mm2src/mm2_main/src/lp_network.rs: base +10/+20/+30):
+#   rpc 7795 (loopback only), p2p 7805 (seed listener), wss 7815 (unused)
+#
+# Apply (replace semantics without touching the rest of the ruleset):
+#   sudo nft delete table inet elektron_kdf 2>/dev/null
+#   sudo nft -f /path/to/nftables-kdf.nft
+
+table inet elektron_kdf {
+    chain input {
+        type filter hook input priority filter + 10; policy accept;
+        # drop the seed's p2p port from anywhere except LAN/Tailnet
+        iifname != "lo" tcp dport 7805 ip saddr != { 192.168.178.0/24, 100.64.0.0/10 } drop
+        # explicit accepts for clarity (policy accepts anyway)
+        ip saddr { 192.168.178.0/24, 100.64.0.0/10 } tcp dport 7805 accept
+    }
+}

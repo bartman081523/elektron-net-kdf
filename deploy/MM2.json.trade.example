@@ -1,0 +1,10 @@
+{
+  "passphrase": "<24-word seed phrase -- generate offline, never commit>",
+  "rpc_password": "<strong random rpc password>",
+  "netid": 2,
+  "gui": "elektron-net",
+  "rpcip": "127.0.0.1",
+  "rpcport": 7796,
+  "dbdir": "/home/<user>/.local/share/kdf/trade1/db",
+  "seednodes": ["<seed-host-lan-or-tailnet-ip>"]
+}
