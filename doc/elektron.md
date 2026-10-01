@@ -193,11 +193,114 @@ z_coin validate_dex_fee tests, and
 test_dex_fee_burn_split_with_discount_and_standard_coins -- all green;
 the discount/burn-split logic really runs in the last one).
 
+### 7. Swap end-to-end verification on regtest (2026-10-01, uncommitted)
+
+`scripts/elektron/` scenario layer on top of section 5's node setup:
+`swap_rpc.py` (RPC helpers), `swap_e2e.py` (driver: `single <n> <role>
+<base> <rel> <vol> <price>`), `swap_fee_report.py`, the scenario
+wrappers (`regtest_swap_maker_elek.sh`, `regtest_swap_taker_elek.sh`,
+`regtest_fee.sh`, `regtest_refund.sh`, `regtest_teardown.sh`) and two
+refund drivers (`refund_r1.py`, `refund_r2.py`) plus a passive watcher
+(`refund_maker_watch.py`). All records go to JSONL files under
+`$RL_ROOT/runs/` (machine-local, not in the repo). Two kdf instances
+("alice" 7793, "bob" 7794, netid 2, both coins in electrum mode against
+the local electrs pair) plus a seed node on 7792/7805.
+
+Result: **13 successful swaps across both roles** -- 12 with bob as
+maker (rELEK->rBTC, volume 10 @ price 0.001, n=10, 20-24, 30-34, 991)
+and 1 with alice as maker (rBTC->rELEK, n=911). `swap_fee_report.py`
+finds no dex fee, no leaks, and lists only miner fees for all of them
+(problems: 0), consistent with section 6.
+
+Protocol facts verified live (A-grade logs, exact event names):
+
+- Swap event vocabulary on this build: Started, Negotiated,
+  MakerPaymentInstructionsReceived, TakerFeeValidated, MakerPaymentSent,
+  MakerPaymentReceived, MakerPaymentValidatedAndConfirmed,
+  TakerPaymentInstructionsReceived, TakerPaymentWaitConfirmStarted,
+  MakerPaymentWaitRefundStarted, MakerPaymentRefundStarted, (...Spend /),
+  success and failure both end in Finished; `my_swap_status` reports
+  `is_finished` + `is_success` (both false right after `buy` -- the swap
+  registers in the RPC with ~0-6 s latency, lp_swap.rs "No swap with
+  uuid"). A failed taker-side payment emits
+  TakerPaymentTransactionFailed; a maker waiting for taker payment data
+  that never arrives ends with TakerPaymentValidateFailed timeout.
+- `my_swap_status` response is a bare result dict with `events`,
+  `is_finished`, `is_success`, maker/taker amount+coin -- there is no
+  "status" string field; consumers must derive state from the event list.
+- `cancel_all_orders` (legacy): the `CancelBy` enum
+  (`lp_ordermatch.rs` CancelBy: All | Pair | Coin) is parsed from a
+  TOP-LEVEL body field `cancel_by`, not inside `params`
+  (`{"cancel_by": {"type": "All"}}`).
+- `unban_pubkeys` (legacy, dispatcher_legacy.rs): body field
+  `unban_by`; form `{"unban_by": {"type": "All"}}` clears every ban
+  including the ones created by ban reasons of type FailedSwap.
+- `mmrpc 2.0 withdraw` returns `tx_hex` + `fee_details` (Utxo type,
+  amount); broadcast with legacy `send_raw_transaction` using top-level
+  `coin`/`tx_hex` fields. This is how coins move instance-to-instance
+  without descriptor-wallet imports.
+
+Failure forensics (all root-caused on live logs, worth keeping because
+each is a real upstream blindspot on modern regtest nodes):
+
+1. `bad-txns-premature-spend-of-coinbase, tried to spend coinbase at
+   depth 59`: a kdf withdrawal selected an immature coinbase; the
+   electrum proxy surfaces the node reject and the swap fails as
+   MakerPaymentTransactionFailed. Prevention: fund from a sink address
+   fed by an independent miner loop, not directly from coinbases
+   (section 5).
+2. An rBTC maker whose coins config still carried mainnet-style Base58
+   address formats offered `3...` payment addresses; the regtest node
+   rejects them ("Invalid or unsupported Base58-encoded address") and
+   the taker's payment broadcast fails with TakerPaymentTransactionFailed.
+   The overlay coins file had to pin `segwit`/`bech32_hrp bcrt` for both
+   rELEK and rBTC before swaps went green.
+3. Native-mode (node RPC) activation: kdf watches maker payment
+   addresses with legacy `importaddress`, which no longer exists on
+   bitcoind v29 descriptor-only wallets ("Method not found"). Swapping
+   in electrum mode avoids the wallet import path entirely; every green
+   swap here runs electrum mode.
+4. Any swap that fails bans its counterpart automatically for 1 h
+   (`ban_pubkey_on_failed_swap`, `lp_swap/pubkey_banning.rs`); while the
+   ban is live the other side's match requests are silently swallowed
+   (`Pubkey ... is not allowed`, `lp_ordermatch.rs`) -- `buy` then
+   publishes a taker ORDER and returns the order uuid, which looks like
+   a swap uuid but never registers. Diagnose with
+   `list_banned_pubkeys`, clear with `unban_pubkeys`; the scenario
+   scripts therefore run a preflight (cancel orders + unban) against
+   both instances before every match attempt, and refund drivers write
+   explicit "kill window missed" records instead of failing silently.
+
+Refund verification (scripted, records in runs/refund-results.jsonl;
+run dates 2026-10-01):
+
+- Maker-side refund: four earlier swaps left 2 rELEK maker payments
+  each locked on bob (taker payment never arrived); `refund_maker_watch.py`
+  observes mm2 retrying and completing the refund once
+  `started_at + 2*lock_duration` (2x7800 s) passes -- maker payment
+  locktime is 2x the taker one (taker: started_at + 7800 s ~ 2h10m).
+- Taker-side refund R1 (`refund_r1.py`): bob maker sells 2 rELEK,
+  alice buys; as soon as alice's taker payment is sent+locked (bob at
+  TakerPaymentWaitConfirmStarted) bob is SIGKILLed; alice refunds her
+  own taker payment after the 7800 s locktime; bob restarted afterwards
+  (restart acceptance, below).
+- Taker-side refund R2 (`refund_r2.py`): alice maker sells 0.001 rBTC,
+  bob buys paying 1 rELEK; alice is killed while still at
+  MakerPaymentInstructionsReceived (nothing broadcast) -- killing later
+  would NOT refund because the taker holds the secret and would spend
+  the maker payment, completing the swap; bob refunds his own taker
+  payment after 7800 s.
+
+Restart acceptance: after the R1 SIGKILL bob was restarted with the
+same MM2.json/env invocation; both coins re-enabled; the interrupted
+R1 swap resumes with its full event history intact (no duplicate
+events, no state leak) and the stuck maker payments keep their refund
+retries (MakerPaymentRefundStarted) across the restart.
+
 ## Planned (NOT implemented)
 
-- Swap end-to-end tests: >= 10 native regtest swaps + refunds, then
-  testnet swaps (public BTC testnet electrum servers + ELEK testnet +
-  optional ETH Sepolia).
+- Testnet swaps: public BTC testnet electrum servers + ELEK testnet +
+  optional ETH Sepolia.
 
 ## Upstream sync policy
 
