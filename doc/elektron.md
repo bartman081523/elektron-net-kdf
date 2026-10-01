@@ -70,12 +70,71 @@ fork does not modify it and must not remove crates from that list.
 - These failures are the fork's regression baseline: during fork work,
   only deviations from this set count as regressions.
 
+### 4. Coins layer: two-layer coins model + elektron tickers
+
+Commits `916da1c` + `dafd7eb`.
+
+- `coins/upstream_coins` is a frozen snapshot of the upstream coins
+  repository (782 entries), `coins/elektron_overlay.json` is the fork's
+  overlay, and `scripts/elektron/coins_merge.py` generates
+  `coins/elektron_coins` (786 entries) deterministically.
+- Overlay tickers: `ELEK` (hrp `be`), `tELEK` (hrp `tb`), `rELEK`
+  (hrp `bcrt`), `rBTC` (hrp `bcrt`, own elektrond regtest); all segwit,
+  `address_format` segwit, `mature_confirmations` 1.
+- `scripts/elektron/coins_runtime.py` injects machine-local settings
+  (`--confpath TICKER=PATH` for native mode, `--rpcport TICKER=PORT`)
+  into a runtime coins file; those values never enter the repo.
+- `derivation_path` entries are account level (`m/84'/1370'`) without a
+  trailing index: mm2 appends the address index itself. Verified live on
+  regtest -- the kdf-derived first address matches `m/84'/1370'/0'`
+  derivation.
+- ELEK activation is verified on regtest in both modes:
+  - electrum mode against the fork electrs on 127.0.0.1:50003:
+    activate -> balance -> withdraw (sign-only) ->
+    `send_raw_transaction` (broadcast; the request **requires** a `coin`
+    field) -> confirm -> balance convergence exact to the satoshi.
+  - native mode (rBTC first, same pattern on the second chain): funding
+    via `importdescriptors` into the node's keyless watch-only wallet
+    "wo", then balance/transfer through the node RPC.
+
+### 5. Native regtest harness (Docker-free) (commit `dafd7eb`)
+
+`scripts/elektron/regtest_up.sh`, `regtest_fund.sh`, `regtest_down.sh`.
+
+Key facts verified live on regtest, now encoded in the scripts:
+
+- elektrond regtest params: coinbase maturity 100; block subsidy halves
+  every 150 blocks (5.0 measured before h150, 2.5 around h150-299, 1.25
+  measured after h300); no `generate` RPC (use `generatetoaddress`);
+  `-fallbackfee` is an init arg.
+- electrs (fork build) is driven with `network = "testnet"` as the
+  stand-in for the regtest chain and `signet_magic = "fabfb5da"` (the
+  elektrond regtest P2P magic, kernel/chainparams.cpp); pruned chains
+  (MandatoryPruneDepth 100) are seeded once from `dumptxoutset` via
+  `utxo_snapshot_dir` -> one-time `electrs-bootstrap.dat` holding the
+  real coin txids (no synthetic ones).
+- electrs logging: `log_filters` must be a plain env_logger spec
+  ("INFO"). A bracket suffix makes electrs warn "invalid logging spec"
+  and log nothing but the config line.
+- electrs electrum port is newline-delimited JSON over TCP, not HTTP --
+  HTTP probes surface as `-32700 parse error` disconnects in the electrs
+  log and empty client responses.
+- electrs exposes immature coinbases as spendable UTXOs; immaturity is
+  only enforced at the node. If a kdf withdrawal picks an immature
+  coinbase, the reject surfaces verbatim in the kdf log as an electrum
+  error: `{"code": 2, "message": "bad-txns-premature-spend-of-coinbase,
+  tried to spend coinbase at depth 17"}`.
+- elektrond `-daemon` writes its own pid file at
+  `<datadir>/regtest/elektrond.pid`; scripts read that file (never
+  pkill/pgrep by pattern -- the pattern text can match the invoking
+  shell itself).
+
 ## Planned (NOT implemented)
 
-- Coins overlay with `ELEK`/`tELEK`/`rELEK`/`rBTC` tickers and ELEK
-  activation (electrum + native).
 - DEX fee policy for ELEK pairs.
-- Native (Docker-free) regtest E2E harness.
+- Swap end-to-end tests: >= 10 native regtest swaps + refunds, then
+  testnet swaps (public BTC testnet electrum servers + ELEK testnet +
+  optional ETH Sepolia).
 
 ## Upstream sync policy
 
