@@ -17288,6 +17288,44 @@
     "derivation_path": "m/44'/1'"
   },
   {
+    "coin": "tBTC",
+    "name": "testnet",
+    "fname": "Bitcoin (testnet3, testnet.aranguren.org electrum)",
+    "pubtype": 111,
+    "p2shtype": 196,
+    "wiftype": 239,
+    "segwit": true,
+    "bech32_hrp": "tb",
+    "address_format": {
+      "format": "segwit"
+    },
+    "decimals": 8,
+    "txfee": 1000,
+    "estimate_fee_mode": "ECONOMICAL",
+    "estimate_fee_blocks": 4,
+    "avg_blocktime": 10,
+    "required_confirmations": 2,
+    "mature_confirmations": 100,
+    "derivation_path": "m/84'/1'",
+    "orderbook_ticker": "tBTC",
+    "mm2": 1,
+    "is_testnet": true,
+    "protocol": {
+      "type": "UTXO",
+      "chain_variant": "BTC"
+    },
+    "electrum": [
+      {
+        "url": "testnet.aranguren.org:51001",
+        "protocol": "TCP"
+      },
+      {
+        "url": "electrum3.cipig.net:10068",
+        "protocol": "TCP"
+      }
+    ]
+  },
+  {
     "coin": "tELEK",
     "name": "elektron-testnet",
     "fname": "Elektron (testnet)",
