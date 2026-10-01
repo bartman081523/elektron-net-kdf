@@ -24,6 +24,11 @@
 #   RPC_USER / RPC_PASS  credentials of the target node
 #   RL_ROOT              same base dir as regtest_up.sh
 #                       (default /run/media/julian/ML5/kdf-regtest)
+#
+# Alternative funding path (electrum-mode kdf, keyless node wallets):
+#   kdf withdraw (mmrpc 2.0) from an already-funded instance plus
+#   send_raw_transaction -- used in this harness for instance-to-instance
+#   funding; see doc/elektron.md.
 # Optional env: WALLETS may be overridden ("wo" by default).
 
 set -euo pipefail
@@ -57,34 +62,52 @@ SINK_ADDR="$RL_ROOT/sink.addr"
 SINK_ADDR=$(cat "$SINK_ADDR")
 
 jrpc() {
-  # $2 must be valid JSON params text (e.g. "[110,\"bcrt1q...\"]")
-  curl -s --max-time 5 --user "$RPC_USER:$RPC_PASS" -H 'content-type: text/plain;' \
-    "http://127.0.0.1:$RPC" \
-    -d "{\"jsonrpc\":\"1.0\",\"id\":\"e\",\"method\":\"$1\",\"params\":$2}"
+  # $2 must be valid JSON params text (e.g. "[110,\"bcrt1q...\"]").
+  # Targets the wallet endpoint explicitly: the regtest node runs its keyless
+  # descriptor wallet under $WALLETS, and a node with that one wallet loaded
+  # may still route unnamed requests elsewhere. Prints node-side errors to
+  # stderr and returns nonzero on them (set -e aborts the script then).
+  local resp
+  resp=$(curl -s --max-time 15 --user "$RPC_USER:$RPC_PASS" -H 'content-type: text/plain;' \
+    "http://127.0.0.1:$RPC/wallet/$WALLETS" \
+    -d "{\"jsonrpc\":\"1.0\",\"id\":\"e\",\"method\":\"$1\",\"params\":$2}") || return 1
+  python3 -c '
+import sys, json
+try:
+    r = json.loads(sys.stdin.read())
+    err = r.get("error")
+except Exception:
+    err = "unparseable node reply"
+if err:
+    sys.stderr.write(str(err) + "\n")
+sys.exit(1) if err else sys.exit(0)
+' <<<"$resp" || return 1
 }
 
 height() {
-  jrpc getblockcount '[]' | \
-    python3 -c 'import json,sys;print(json.load(sys.stdin)["result"])'
+  local resp
+  resp=$(curl -s --max-time 15 --user "$RPC_USER:$RPC_PASS" -H 'content-type: text/plain;' \
+    "http://127.0.0.1:$RPC/wallet/$WALLETS" \
+    -d '{"jsonrpc":"1.0","id":"e","method":"getblockcount","params":[]}')
+  python3 -c 'import json,sys;print(json.loads(sys.stdin.read())["result"])' <<<"$resp"
 }
 
 if [ -n "$DESCRIPTOR" ]; then
   echo "importing descriptor into wallet(s): $WALLETS"
   jrpc importdescriptors \
-    "[{\"desc\":\"$DESCRIPTOR\",\"label\":\"mm2\",\"active\":true}]" \
-    >/dev/null
+    "[{\"desc\":\"$DESCRIPTOR\",\"label\":\"mm2\",\"active\":true}]"
 fi
 
 if [ "$SINK_ONLY" != "1" ] && [ -n "$ADDR" ]; then
   echo "mining $BLOCKS coinbases to $ADDR"
-  jrpc generatetoaddress "[$BLOCKS,\"$ADDR\"]" >/dev/null
+  jrpc generatetoaddress "[$BLOCKS,\"$ADDR\"]"
 elif [ "$SINK_ONLY" != "1" ]; then
   echo "--addr required (or --sink-only)" >&2
   exit 1
 fi
 
 echo "mining $SINK_BLOCKS sink blocks to $SINK_ADDR (maturity fix)"
-jrpc generatetoaddress "[$SINK_BLOCKS,\"$SINK_ADDR\"]" >/dev/null
+jrpc generatetoaddress "[$SINK_BLOCKS,\"$SINK_ADDR\"]"
 
 tip=$(height)
 echo "done. node tip is now $tip."
