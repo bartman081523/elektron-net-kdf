@@ -4049,6 +4049,19 @@ pub enum DexFee {
     },
 }
 
+/// Elektron-Net fork: swaps with a side of these tickers pay NO dex fee to the
+/// upstream `DEX_FEE_ADDR_RAW_PUBKEY` constant, so fees paid on elektron trades
+/// stay inside the network. `DexFee::NoFee` is a first-class upstream protocol
+/// state -- the taker state machine skips the fee tx for it entirely
+/// ("Taker fee tx not sent for dex taker" in lp_swap/taker_swap.rs) and the
+/// utxo spend paths handle it (empty fee outputs, maker-only spend).
+const ELEKTRON_TICKERS: &[&str] = &["ELEK", "tELEK", "rELEK"];
+
+/// Elektron fork: true when the base/rel pair has an elektron side.
+fn is_elektron_pair(base: &str, rel: &str) -> bool {
+    ELEKTRON_TICKERS.contains(&base) || ELEKTRON_TICKERS.contains(&rel)
+}
+
 impl DexFee {
     const DEX_FEE_SHARE: &'static str = "0.75";
 
@@ -4082,6 +4095,14 @@ impl DexFee {
     ) -> DexFee {
         if !taker_coin.is_privacy() && taker_coin.burn_pubkey() == taker_pubkey {
             return DexFee::NoFee; // no dex fee if the taker is the burn pubkey
+        }
+        // elektron-net fork: no dex fee when either side is an elektron ticker,
+        // so no fee output goes to the upstream pubkey constant and the fee
+        // stays inside the network. The GLEEC discount list of `dex_fee_rate`
+        // is deliberately unchanged. The !is_privacy() guard mirrors the check
+        // above -- the privacy path errors on unexpected NoFee (z_htlc.rs).
+        if !taker_coin.is_privacy() && is_elektron_pair(taker_coin.ticker(), maker_ticker) {
+            return DexFee::NoFee;
         }
         Self::new_from_taker_coin(taker_coin, maker_ticker, trade_amount)
     }

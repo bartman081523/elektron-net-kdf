@@ -4521,6 +4521,19 @@ pub async fn get_fee_to_send_taker_fee<T>(
 where
     T: MarketCoinOps + UtxoCommonOps + SwapOps,
 {
+    // elektron-net fork: no fee tx is ever sent for DexFee::NoFee (the taker
+    // state machine skips it), so there is no tx to price here -- return a
+    // zero fee instead of building a tx with an empty output set, which
+    // upstream could never reach because NoFee was unreachable for ordinary
+    // takers.
+    if matches!(dex_fee, DexFee::NoFee) {
+        return Ok(TradeFee {
+            coin: coin.ticker().to_owned(),
+            amount: MmNumber::default(),
+            paid_from_trading_vol: false,
+        });
+    }
+
     let outputs = generate_taker_fee_tx_outputs(coin, &dex_fee).map_err(TradePreimageError::InternalError)?;
 
     let gas_fee = None;
