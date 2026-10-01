@@ -110,6 +110,11 @@ impl<T: ?Sized, A: Allocator> NotMmError for Box<T, A> {}
 impl<T: ?Sized> NotMmError for Arc<T> {}
 /// for UnsafeCell<dyn Trait>
 impl<T: ?Sized> NotMmError for UnsafeCell<T> {}
+/// for NonNull<dyn Trait>.
+/// Required on newer toolchains: rustc walks auto-trait derivation through
+/// NonNull inside std::io::Error (Custom/CustomOwner reprs), so the
+/// structural derivation of `std::io::Error` fails with E0277 otherwise.
+impl<T: ?Sized> NotMmError for std::ptr::NonNull<T> {}
 
 pub trait SerMmErrorType: SerializeErrorType + fmt::Display + NotMmError {}
 
