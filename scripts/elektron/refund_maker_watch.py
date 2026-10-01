@@ -6,6 +6,10 @@ the taker's payment never arrived). Their maker_payment_lock is
 started_at + 2*lock_duration (~4h20m after start). As long as bob keeps
 running, mm2 retries the refund and broadcasts once CLTV unlocks. Appends
 one record per swap to runs/refund-results.jsonl.
+
+The watcher keeps polling while the kdf instance is down (connection
+refused): refund attempts resume after a restart, so downtime here is
+expected, not fatal.
 """
 import json, os, sys, time
 
@@ -36,7 +40,14 @@ def main():
     log("watching %d stuck maker payments for refund" % len(todo))
     while todo and time.time() < deadline:
         for uuid in list(todo):
-            res = status(*BOB, uuid)
+            try:
+                res = status(*BOB, uuid)
+            except Exception as e:
+                if todo[uuid] != "rpc_down":
+                    todo[uuid] = "rpc_down"
+                    log("  %s -> rpc down (%s); refund retries resume on restart" %
+                        (uuid[:8], type(e).__name__))
+                continue
             if not res.get("is_finished"):
                 evs = res.get("events") or []
                 le = evs[-1]["event"]["type"] if evs else None

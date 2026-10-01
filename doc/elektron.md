@@ -193,24 +193,28 @@ z_coin validate_dex_fee tests, and
 test_dex_fee_burn_split_with_discount_and_standard_coins -- all green;
 the discount/burn-split logic really runs in the last one).
 
-### 7. Swap end-to-end verification on regtest (2026-10-01, uncommitted)
+### 7. Swap end-to-end verification on regtest (2026-10-01)
 
 `scripts/elektron/` scenario layer on top of section 5's node setup:
 `swap_rpc.py` (RPC helpers), `swap_e2e.py` (driver: `single <n> <role>
-<base> <rel> <vol> <price>`), `swap_fee_report.py`, the scenario
-wrappers (`regtest_swap_maker_elek.sh`, `regtest_swap_taker_elek.sh`,
-`regtest_fee.sh`, `regtest_refund.sh`, `regtest_teardown.sh`) and two
-refund drivers (`refund_r1.py`, `refund_r2.py`) plus a passive watcher
-(`refund_maker_watch.py`). All records go to JSONL files under
-`$RL_ROOT/runs/` (machine-local, not in the repo). Two kdf instances
-("alice" 7793, "bob" 7794, netid 2, both coins in electrum mode against
-the local electrs pair) plus a seed node on 7792/7805.
+<base> <rel> <vol> <price>`; role = which instance is the maker),
+`swap_fee_report.py`, the scenario wrappers (`regtest_swap_maker_elek.sh`,
+`regtest_swap_taker_elek.sh`, `regtest_fee.sh`, `regtest_refund.sh`,
+`regtest_teardown.sh`), three refund drivers (`refund_r1.py`: maker
+killed while the taker waits, `refund_r2.py`: maker killed during a
+miner freeze, `restart_recovery_watch.py`: post-restart recovery of an
+expired maker payment) and a passive watcher (`refund_maker_watch.py`)
+that completes maker-side locktime refunds. All records go to JSONL
+files under `$RL_ROOT/runs/` (machine-local, not in the repo). Two kdf
+instances ("alice" 7793, "bob" 7794, netid 2, both coins in electrum
+mode against the local electrs pair) plus a seed node on 7792/7805.
 
-Result: **13 successful swaps across both roles** -- 12 with bob as
-maker (rELEK->rBTC, volume 10 @ price 0.001, n=10, 20-24, 30-34, 991)
-and 1 with alice as maker (rBTC->rELEK, n=911). `swap_fee_report.py`
-finds no dex fee, no leaks, and lists only miner fees for all of them
-(problems: 0), consistent with section 6.
+Result: **17 successful swaps across both roles** -- 15 with bob as
+maker (rELEK->rBTC, volume 2-10 @ price 0.001, n=10, 20-24, 30-34, 35,
+991 plus the two kill-window swaps) and 2 with alice as maker
+(rBTC->rELEK, n=911, 912). `swap_fee_report.py` finds no dex fee, no
+leaks, and lists only miner fees for all of them (problems: 0),
+consistent with section 6.
 
 Protocol facts verified live (A-grade logs, exact event names):
 
@@ -239,6 +243,37 @@ Protocol facts verified live (A-grade logs, exact event names):
   amount); broadcast with legacy `send_raw_transaction` using top-level
   `coin`/`tx_hex` fields. This is how coins move instance-to-instance
   without descriptor-wallet imports.
+- Swap direction on this build (taker state machine,
+  `mm2src/mm2_main/src/lp_swap/taker_swap.rs:180-210`): the taker never
+  claims first. After MakerPaymentValidatedAndConfirmed the taker sends
+  his own payment (`TakerPaymentSent` -> `WatcherMessageSent`, the secret
+  reaches the maker off-chain) and enters `WaitForTakerPaymentSpend`; it
+  is the MAKER who claims the taker's payment, and only the taker-side
+  `TakerPaymentSpent` event moves the taker on to `SpendMakerPayment`
+  (`MakerPaymentSpent` -> `MakerPaymentSpendConfirmed` -> `Finished`).
+  The same mapping covers the failure side: with the maker dead the wait
+  ends in `TakerPaymentWaitForSpendFailed` ->
+  `PrepareForTakerPaymentRefund` -> `TakerPaymentRefundStarted`/`...Refunded`/
+  `...RefundFinished` -> `Finished`.
+- Full green swap timeline at 3-s blocks (maker-side event timestamps,
+  swap 3665dbae): Started +0s, Negotiated +2.0, MakerPaymentSent ~+3.0,
+  TakerPaymentReceived (taker payment data arrives -- the taker sends it
+  only after her payment confirmed) +20.1, TakerPaymentValidatedAndConfirmed
+  +22 ms later, TakerPaymentSpent (maker's claim broadcast) +158 ms,
+  TakerPaymentSpendConfirmed +15.1, Finished: ~35 s end to end.
+  Consequence: between the maker's `TakerPaymentWaitConfirmStarted` and
+  `TakerPaymentValidatedAndConfirmed` lie only ~22 ms on this coin setup,
+  so poll-based kill triggers must watch the TAKER's
+  `MakerPaymentWaitConfirmStarted` window (~7 s: the taker's own
+  confirmation wait for the maker payment) instead.
+- Restart semantics (verified live, matters for every restart): a
+  restarted instance restores its swap history from the DB but coins are
+  NOT re-activated automatically -- the log repeats "Can't kickstart the
+  swap <uuid> until the coin rELEK is activated" until an activation call
+  runs again; restored swaps kickstart on their own the moment the coins
+  are enabled. Every restart step of the harness therefore calls the
+  coins-activation helper (`ensure_coins` in `swap_rpc.py`) before
+  asserting anything about swaps.
 
 Failure forensics (all root-caused on live logs, worth keeping because
 each is a real upstream blindspot on modern regtest nodes):
@@ -271,31 +306,58 @@ each is a real upstream blindspot on modern regtest nodes):
    both instances before every match attempt, and refund drivers write
    explicit "kill window missed" records instead of failing silently.
 
-Refund verification (scripted, records in runs/refund-results.jsonl;
-run dates 2026-10-01):
+Refund verification (scripted, records in runs/refund-results.jsonl,
+run dates 2026-10-01). Two locktime rules drive everything (verified via
+`my_swap_status` timestamps and the on-chain outcomes): the taker payment
+becomes refundable at `started_at + 7800 s` (~2h10m), the maker payment
+at `started_at + 2*7800 s` (~4h20m). Four refund shapes are recorded:
 
-- Maker-side refund: four earlier swaps left 2 rELEK maker payments
-  each locked on bob (taker payment never arrived); `refund_maker_watch.py`
-  observes mm2 retrying and completing the refund once
-  `started_at + 2*lock_duration` (2x7800 s) passes -- maker payment
-  locktime is 2x the taker one (taker: started_at + 7800 s ~ 2h10m).
-- Taker-side refund R1 (`refund_r1.py`): bob maker sells 2 rELEK,
-  alice buys; as soon as alice's taker payment is sent+locked (bob at
-  TakerPaymentWaitConfirmStarted) bob is SIGKILLed; alice refunds her
-  own taker payment after the 7800 s locktime; bob restarted afterwards
-  (restart acceptance, below).
-- Taker-side refund R2 (`refund_r2.py`): alice maker sells 0.001 rBTC,
-  bob buys paying 1 rELEK; alice is killed while still at
-  MakerPaymentInstructionsReceived (nothing broadcast) -- killing later
-  would NOT refund because the taker holds the secret and would spend
-  the maker payment, completing the swap; bob refunds his own taker
-  payment after 7800 s.
+1. Maker-side refund, taker payment never arrived (`refund_maker_watch.py`,
+   4 records): the maker payment stays locked; once its locktime passes the
+   maker side runs
+   `MakerPaymentSent -> TakerPaymentValidateFailed ->
+   MakerPaymentWaitRefundStarted -> MakerPaymentRefundStarted ->
+   MakerPaymentRefunded -> MakerPaymentRefundFinished -> Finished`.
+2. Taker refund with a dead maker (`refund_r2.py`, swap f4679a0e): the
+   maker (alice) is SIGKILLed while her payment is broadcast-but-still-
+   unconfirming (the miner loop is frozen so the confirmation window
+   cannot close). The taker (bob) proceeds alone --
+   `TakerPaymentSent -> WatcherMessageSent -> TakerPaymentWaitForSpendFailed
+   -> TakerPaymentWaitRefundStarted -> TakerPaymentRefundStarted ->
+   TakerPaymentRefunded ->
+   TakerPaymentRefundFinished -> Finished` at the taker locktime. The
+   maker's payment is never spent; it stays HTLC-locked until the maker
+   locktime. The same shape holds when the maker is killed at ANY later
+   point: the taker only ever waits for the maker's claim.
+3. Maker-payment recovery after restart (`restart_recovery_watch.py`,
+   swap f4679a0e again): the maker instance is restarted once
+   `started_at + 2*7800 s` has already passed; after the coins are
+   re-enabled the restored swap state runs the maker refund chain
+   immediately (`MakerPaymentWaitConfirmFailed -> WaitRefund -> Refund ->
+   Finished`), returning the payment minus miner fee.
+4. Kill-window swap converted into cooperative completion (`refund_r1.py`,
+   swaps fb922309 + c3f0be69): the maker (bob) is SIGKILLed while the
+   taker waits for his payment to confirm (trigger: the taker's
+   `MakerPaymentWaitConfirmStarted` -- her event list ends exactly before
+   `TakerPaymentSent`). Bob's restart restores his swap state at
+   `MakerPaymentSent`; the taker's payment data arrives over the P2P
+   connection, bob claims the taker payment and the swap completes green
+   for both parties -- restart-resume with no state leak. Operational
+   consequence: to collect refund evidence the killed side must stay DOWN
+   until the counterpart's refund has run; a restarted restored state can
+   still complete the swap (observed twice). With the maker staying dead,
+   the pure taker-refund shape is that of scenario 2 -- the taker state
+   machine is role-agnostic.
 
-Restart acceptance: after the R1 SIGKILL bob was restarted with the
-same MM2.json/env invocation; both coins re-enabled; the interrupted
-R1 swap resumes with its full event history intact (no duplicate
-events, no state leak) and the stuck maker payments keep their refund
-retries (MakerPaymentRefundStarted) across the restart.
+Restart acceptance (all A-grade across several restarts of both
+instances on 2026-10-01): the interrupted swap resumes with its full
+event history intact from the DB (no duplicate events, no state leak;
+restored swaps kickstart on coin activation -- see the restart-semantics
+bullet above); swaps whose counterpart stays live complete
+cooperatively after a restart (swaps fb922309, c3f0be69); stuck maker
+payments keep their refund retries across restarts and complete at
+locktime expiry while the instance is up; an expired maker payment
+refunds immediately after restart (swap f4679a0e, shape 3).
 
 ## Planned (NOT implemented)
 

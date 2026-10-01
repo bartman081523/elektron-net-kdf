@@ -2,7 +2,7 @@
 """Elektron-net native regtest swap harness (Docker-free)."""
 import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from swap_rpc import ALICE, BOB, rpc, ok, ensure_coins, balance
+from swap_rpc import ALICE, BOB, rpc, ok, ensure_coins, balance, preflight
 
 RL = "/run/media/julian/ML5/kdf-regtest"
 RESULTS = os.path.join(RL, "runs", "swap-results.jsonl")
