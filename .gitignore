@@ -58,7 +58,14 @@ scripts/mm2/seed/unparsed.txt
 /mm2src/*/.vscode/ipch
 
 # coins configuration file
-/coins
+# Fork (elektron-net-kdf): the two-layer model files in coins/ are committed
+# on purpose (see coins/README.md). Everything else under coins/ stays
+# ignored (runtime artifacts).
+/coins/*
+!/coins/README.md
+!/coins/upstream_coins
+!/coins/elektron_overlay.json
+!/coins/elektron_coins
 # MM2 conf to avoid occasional adding to git by someone
 MM2.json
 
