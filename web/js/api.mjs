@@ -149,8 +149,19 @@ export const orderStatus = (uuid) => legacy('order_status', { uuid });
 export const withdraw = (p) => v2('withdraw', p);
 export const sendRaw = (coin, txHex) => legacy('send_raw_transaction', { coin, tx_hex: txHex });
 export const tradePreimage = (p) => v2('trade_preimage', p);
+// ---- swaps -----------------------------------------------------------------
+// Both dispatchers expose the swap RPCs (dispatcher.rs:237/273/274 and the
+// legacy twins); the SPA uses the v2 forms only:
+//  - v2 items are UNIFORM SwapRpcData {"swap_type","swap_data"} externally
+//    tagged (swap_v2_rpcs.rs:286); legacy items differ per swap version.
+//  - V1 swap_data carries the revealed secret inside events (no hide_secrets
+//    on the v2 routes) — views render curated fields only, never event dumps.
+//  - legacy twins: active_swaps answers BARE with `statuses: null`
+//    (lp_swap.rs:1576-1615), my_swap_status reads params.uuid top-level
+//    (lp_swap.rs:1111) and applies hide_secrets; only used by selftest.
 export const swapStatus = (uuid) => v2('my_swap_status', { uuid });
-export const activeSwaps = (includeStatus = true) => v2('active_swaps', { include_status: includeStatus });
+export const activeSwaps = (includeStatus = false) =>
+  v2('active_swaps', { include_status: includeStatus });
 export const recentSwaps = (filter = {}, paging = {}) =>
   v2('my_recent_swaps', { ...filter, ...paging });
 export const electrum = (coin, servers, confs = 2) =>

@@ -286,6 +286,10 @@ STATE = {
     'book': {},
     # uuid -> taker order value (sell/buy rest here — never in the book)
     'takers': {},
+    # uuid -> {'swap_type': MakerV1|..., 'swap_data': <per-type swap struct>}
+    'active': {},
+    # history: newest first, same tagged form as the v2 API returns
+    'hist': [],
 }
 
 
@@ -298,6 +302,197 @@ ORIG = {}   # pristine book records (the cycle re-adds from here)
 for _u, (_side, _price, _vol, _mine) in BASE_BOOK.items():
     ORIG[_u] = _record(_u, _side, _price, _vol, _mine)
     STATE['book'][_u] = dict(ORIG[_u])   # full initial book incl. the own ask
+
+
+# ---- swap surfaces (F3) ------------------------------------------------------
+# Shapes pinned 2026-10-02 (lp_swap.rs + swap_v2_rpcs.rs + streamer_ids.rs):
+# - v2 active_swaps {include_status} -> wrapped {uuids, statuses:{}|{uuid:tag}};
+#   the legacy twin answers BARE {uuids, statuses: null|{v1 items}} (statuses
+#   is an Option in the legacy response — null without include_status, and
+#   include_status=true fills V1 swaps only).
+# - v2 my_recent_swaps -> wrapped {swaps: [tagged items], from_uuid, skipped,
+#   limit, total, page_number, total_pages, found_records}; items are
+#   SwapRpcData = {"swap_type": MakerV1|TakerV1|MakerV2|TakerV2, "swap_data":
+#   <per-type>}. Uniform across swap versions — that is why the v2 route (not
+#   the legacy one, whose item shape differs per version) feeds history.
+# - v2 my_swap_status {uuid} -> one tagged item, or v2 error NoSwapWithUuid.
+#   V1 payloads carry the swap secret inside the Started event (no
+#   hide_secrets on this route) — consumers must render curated fields only.
+# - legacy my_swap_status reads params.uuid on the LEGACY envelope too
+#   (lp_swap.rs:1111) and answers MySwapStatusResponse: flatten SavedSwap
+#   plus "type": Maker|Taker, my_info, recoverable, is_finished and
+#   is_success (absent when unfinished); hide_secrets applied.
+# Event wrapper timestamps are milliseconds (live pin: 13 digits) while
+# started_at inside Started data is seconds.
+
+SWAP_TS = int(time.time())
+
+# a canned chain, kept short but with realistic V1 event names
+_TAKER_OK_CHAIN = ['Negotiated', 'TakerFeeSent', 'MakerPaymentReceived',
+                   'TakerPaymentSent', 'TakerPaymentSpent', 'Finished']
+_MAKER_OK_CHAIN = ['Negotiated', 'MakerPaymentSent', 'TakerPaymentSpent', 'Finished']
+_TAKER_FAIL_CHAIN = ['Negotiated', 'TakerFeeSent', 'Error', 'Finished']
+
+
+def _kdata(kind):
+    """Curated-safe data for canned events (a hash only, no secrets needed)."""
+    if kind == 'Negotiated':
+        return {'taker_payment_locktime': SWAP_TS + 7200, 'maker_payment_lock': SWAP_TS + 7800}
+    if kind in ('TakerFeeSent', 'TakerPaymentSent', 'TakerPaymentSpent',
+                'MakerPaymentSent', 'MakerPaymentSpent', 'MakerPaymentSpendConfirmed'):
+        return {'tx_hash': '%032x' % (abs(hash(kind)) % 2**128)}
+    if kind == 'MakerPaymentReceived':
+        return {'tx_hash': 'bb' * 32}
+    if kind == 'Error':
+        return {'error': 'TakerPaymentValidate failed: mock canned failure'}
+    return {}
+
+
+def _ev(started_ms, seq, kind):
+    return {'timestamp': int(started_ms + seq * 30000),
+            'event': {'type': kind, 'data': _kdata(kind)}}
+
+
+def _t_start_data(maker, taker, m_amt, t_amt, started_at):
+    """Started event data, TakerSwapData lookalike (live pin, F2). The secret
+    field is deliberately present with a fake hex — real V1 payloads carry it
+    on the v2 routes, and the UI timeline must never render it."""
+    return {
+        'taker_coin': taker, 'maker_coin': maker,
+        'taker': OTHER_PUBKEY, 'maker': MY_PUBKEY,
+        'secret': '6f' * 32,
+        'secret_hash': 'e2c0b09eee6324b549184daefb00ef9a9b6f2e7c',
+        'lock_duration': 7800,
+        'maker_amount': str(m_amt), 'taker_amount': str(t_amt),
+        'maker_payment_lock': started_at + 7800,
+        'started_at': started_at,
+        'maker_payment_confirmations': 2, 'taker_payment_confirmations': 1,
+        'maker_payment_requires_nota': False, 'taker_payment_requires_nota': False,
+        'maker_coin_start_block': 25062, 'taker_coin_start_block': 24738,
+        'maker_payment_trade_fee': {'coin': maker, 'amount': '0.00001',
+                                    'paid_from_trading_vol': False},
+        'taker_payment_spend_trade_fee': {'coin': taker, 'amount': '0.00002',
+                                          'paid_from_trading_vol': True},
+    }
+
+
+def _v1swap(uuid, side, maker, taker, m_amt, t_amt, started_at, kinds, ok=True):
+    """TakerSavedSwap/MakerSavedSwap lookalike (one struct for both sides —
+    field names coincide; coins/amounts stay None like the real Opt fields).
+    `kinds` is the event chain AFTER Started — it drives the UI timeline."""
+    data = _t_start_data(maker, taker, m_amt, t_amt, started_at)
+    data['uuid'] = uuid
+    t = started_at * 1000
+    events = [dict(_ev(t, 0, 'Started'),
+                   **{'event': {'type': 'Started', 'data': data}})]
+    for i, kind in enumerate(kinds, 1):
+        events.append(_ev(t, i, kind))
+    return {
+        'uuid': uuid,
+        'my_order_uuid': 'ae2bdaf1-040d-49b6-be7a-565f511c0171',
+        'events': events,
+        'maker_amount': None, 'maker_coin': None,
+        'taker_amount': None, 'taker_coin': None,
+        'gui': None, 'mm_version': '3.0.0-beta_mock',
+        'success_events': ['Finished'] if ok else [],
+        'error_events': [] if ok else ['Error'],
+    }
+
+
+def _my_swap_for_rpc_v2(uuid, my_coin, other_coin, started_at, my_vol, other_vol):
+    """MySwapForRpc (V2 swap): my_/other_ perspective, is_finished at top."""
+    return {
+        'my_coin': my_coin, 'other_coin': other_coin, 'uuid': uuid,
+        'started_at': started_at, 'is_finished': True,
+        'events': [{'timestamp': started_at * 1000, 'event': {'type': 'Started', 'data': {}}},
+                   {'timestamp': started_at * 1000 + 60000, 'event': {'type': 'Finished', 'data': {}}}],
+        'maker_volume': other_vol, 'taker_volume': my_vol,
+        'premium': '0', 'dex_fee': '0', 'lock_duration': 7800,
+        'maker_coin_confs': 2, 'maker_coin_nota': False,
+        'taker_coin_confs': 1, 'taker_coin_nota': False, 'swap_version': 2,
+    }
+
+
+def _init_swaps():
+    now = int(time.time())
+    act = 'c401d0a0-0000-4100-8000-00000000f004'
+    act_start_data = _t_start_data('tBTC', 'ELEK', '0', '0', now - 300)
+    act_start_data.update({'uuid': act, 'maker_amount': '1', 'taker_amount': '0.5'})
+    active = {'swap_type': 'TakerV1', 'swap_data': {
+        'uuid': act, 'my_order_uuid': 'be2bdaf1-040d-49b6-be7a-565f511c0172',
+        'events': [dict(_ev((now - 300) * 1000, 0, 'Started'),
+                        **{'event': {'type': 'Started', 'data': act_start_data}}),
+                    _ev((now - 300) * 1000, 1, 'Negotiated'),
+                    _ev((now - 300) * 1000, 2, 'TakerFeeSent')],
+        'maker_amount': None, 'maker_coin': None,
+        'taker_amount': None, 'taker_coin': None,
+        'gui': None, 'mm_version': '3.0.0-beta_mock',
+        'success_events': [], 'error_events': [],
+    }}
+    hist = [
+        # oldest first is wrong for the API (newest first) — the V2 item gets
+        # the newest started_at so list order below is already DESC
+        {'swap_type': 'MakerV2', 'swap_data': _my_swap_for_rpc_v2(
+            'c401d0a0-0000-4100-8000-00000000f005', 'ELEK', 'tBTC', now - 60,
+            '0.5', '0.25')},
+        {'swap_type': 'TakerV1', 'swap_data': _v1swap(
+            'c401d0a0-0000-4100-8000-00000000f002', 'Taker', 'tBTC', 'ELEK',
+            '2', '1', now - 1800, _TAKER_OK_CHAIN, True)},
+        {'swap_type': 'MakerV1', 'swap_data': _v1swap(
+            'c401d0a0-0000-4100-8000-00000000f003', 'Maker', 'ELEK', 'tBTC',
+            '10', '0.005', now - 3600, _MAKER_OK_CHAIN, True)},
+        {'swap_type': 'TakerV1', 'swap_data': _v1swap(
+            'c401d0a0-0000-4100-8000-00000000f006', 'Taker', 'ELEK', 'tBTC',
+            '0', '0', now - 7200, _TAKER_FAIL_CHAIN, False)},
+    ]
+    with BOOK_LOCK:
+        STATE['active'] = {act: active}
+        STATE['hist'] = hist
+
+
+def _legacy_item(swap_type, v1s):
+    """MySwapStatusResponse form (legacy routes): side tag + my_info +
+    is_finished/is_success, with hide_secrets applied (secret zeroed)."""
+    side = 'Taker' if swap_type.startswith('Taker') else 'Maker'
+    item = {'type': side}
+    s = json.loads(json.dumps(v1s))     # deep copy — STATE is shared
+    for ev in s.get('events') or []:
+        data = ev.get('event', {}).get('data')
+        if isinstance(data, dict) and 'secret' in data:
+            data['secret'] = '00' * 32
+    item.update(s)
+    first = (s.get('events') or [{}])[0].get('event', {}).get('data') or {}
+    if first.get('started_at') is not None:
+        if side == 'Taker':
+            item['my_info'] = {'my_coin': first.get('taker_coin'),
+                               'other_coin': first.get('maker_coin'),
+                               'my_amount': first.get('taker_amount'),
+                               'other_amount': first.get('maker_amount'),
+                               'started_at': first['started_at']}
+        else:
+            item['my_info'] = {'my_coin': first.get('maker_coin'),
+                               'other_coin': first.get('taker_coin'),
+                               'my_amount': first.get('maker_amount'),
+                               'other_amount': first.get('taker_amount'),
+                               'started_at': first['started_at']}
+    else:
+        item['my_info'] = None
+    item['recoverable'] = False
+    last = (s.get('events') or [{}])[-1].get('event', {}).get('type')
+    item['is_finished'] = last == 'Finished'
+    if item['is_finished']:
+        item['is_success'] = not s.get('error_events')
+    return item
+
+
+def _tagged(uuid):
+    with BOOK_LOCK:
+        s = STATE['active'].get(uuid) or next(
+            (i for i in STATE['hist'] if i['swap_data'].get('uuid') == uuid), None)
+    return dict(s) if s else None
+
+
+_init_swaps()   # canned swap surfaces ready before the first request arrives
 
 
 def _mode_guard(req):
@@ -327,6 +522,60 @@ def _canned(req):
         opts = req.get('params') if isinstance(req.get('params'), dict) else {}
         return _respond(req, _set_mode(opts.get('mode', 'ok')))
 
+    if method == 'mock.swap_reset':
+        # control method (see mock.set_mode note): rebuild the canned swaps
+        _init_swaps()
+        with BOOK_LOCK:
+            n_act, n_hist = len(STATE['active']), len(STATE['hist'])
+        return _respond(req, {'active': n_act, 'hist': n_hist})
+
+    if method == 'mock.swap_event':
+        # control method (see mock.set_mode note): append one event to an
+        # active swap — {uuid?, type, data?}; without an active one a fresh
+        # TakerV1 swap is created. Emitting follows the real SSE frame
+        # (SWAP_STATUS message: swap_type + swap_data {uuid, event}).
+        opts = req.get('params') if isinstance(req.get('params'), dict) else req
+        kind = opts.get('type') or 'Negotiated'
+        data = opts.get('data') if opts.get('data') is not None else _kdata(kind)
+        now_ms = int(time.time() * 1000)
+        with BOOK_LOCK:
+            entry = (STATE['active'].get(opts.get('uuid'))
+                     or next(iter(STATE['active'].values()), None))
+            if entry is None:
+                uuid = 'c401d0a0-0000-4100-8000-00000000f020'
+                started_at = int(time.time())
+                d = _t_start_data('tBTC', 'ELEK', '0.02', '0.01', started_at)
+                d['uuid'] = uuid
+                sw = {
+                    'uuid': uuid, 'my_order_uuid': None,
+                    'events': [{'timestamp': started_at * 1000,
+                                'event': {'type': 'Started', 'data': d}}],
+                    'maker_amount': None, 'maker_coin': None,
+                    'taker_amount': None, 'taker_coin': None,
+                    'gui': None, 'mm_version': '3.0.0-beta_mock',
+                    'success_events': [], 'error_events': [],
+                }
+                entry = {'swap_type': 'TakerV1', 'swap_data': sw}
+                STATE['active'][uuid] = entry
+            else:
+                uuid = entry['swap_data']['uuid']
+            sw = entry['swap_data']
+            sw['events'].append({'timestamp': now_ms,
+                                 'event': {'type': kind, 'data': data}})
+            if kind in ('Finished', 'Terminated'):
+                STATE['active'].pop(uuid, None)
+                STATE['hist'].insert(0, entry)
+            swap_type = entry['swap_type']
+        _broadcast_sse(json.dumps({
+            '_type': 'SWAP_STATUS',
+            'message': {'swap_type': swap_type,
+                        'swap_data': {'uuid': uuid,
+                                      'event': {'timestamp': now_ms,
+                                                'event': {'type': kind,
+                                                          'data': data}}}}}))
+        return _respond(req, {'uuid': uuid, 'event': kind,
+                              'moved_to_history': kind in ('Finished', 'Terminated')})
+
     guard = _mode_guard(req)
     if guard is not None:
         return guard
@@ -343,8 +592,8 @@ def _canned(req):
         return _respond(req, coins)
 
     if method == 'trade_preimage':
-        # v2 shape seen live (taker form pinned in F1/F2): total_fees rows
-        # plus required_balance. setprice form unpinned — same generic shape.
+        # v2 shape pinned live on regtest (F1/F2, 2026-10-02): base_coin_fee/
+        # rel_coin_fee + total_fees rows, each with required_balance.
         vol = params.get('volume') or '1'
         fees = [
             {'coin': 'ELEK', 'amount': '0.0001', 'type': 'Maker/TradeFee'},
@@ -397,8 +646,9 @@ def _canned(req):
     if method == 'setprice':
         if _is_v2(req):
             return _v2_error('NoSuchMethod', 'dispatcher', {'data': [method]})
-        # MAKER: MakerOrderCreated — the order joins the book (via the P2P
-        # loopback on the real daemon); SSE listeners get their own frame.
+        # MAKER — pinned live (regtest 2026-10-02): the result is a BARE
+        # MakerOrder (no 'Created' wrapper, uuid top level); the order joins
+        # the book via the P2P loopback, SSE listeners get their own frame.
         uuid = '11e5a1f0-0000-4100-8000-%012d' % (len(STATE['book']) + 1)
         price = params.get('price', '0.00001')
         base_vol = params.get('volume', '10')
@@ -472,15 +722,67 @@ def _canned(req):
             takers = {uuid: dict(v) for uuid, v in STATE['takers'].items()}
         return _respond(req, {'maker_orders': makers, 'taker_orders': takers})
 
+    # ---- swaps (F3) ----------------------------------------------------------
     if method == 'active_swaps':
-        return _respond(req, {'uuids': [], 'statuses': {}})
+        include = bool(params.get('include_status') or False)
+        with BOOK_LOCK:
+            act = {u: dict(s) for u, s in STATE['active'].items()}
+        if _is_v2(req):
+            statuses = {u: {'swap_type': s['swap_type'], 'swap_data': s['swap_data']}
+                        for u, s in act.items()} if include else {}
+            return _respond(req, {'uuids': sorted(act), 'statuses': statuses})
+        # legacy twin: BARE envelope (no "result" wrapper), statuses is an
+        # Option -> null without include_status; include only fills V1 swaps
+        # as raw type-tagged SavedSwap (hide_secrets NOT applied there).
+        statuses = None
+        if include:
+            statuses = {u: dict({'type': ('Taker' if act[u]['swap_type'].startswith('Taker')
+                                          else 'Maker'), **act[u]['swap_data']})
+                        for u in sorted(act) if act[u]['swap_type'].endswith('V1')}
+        return {'uuids': sorted(act), 'statuses': statuses}
 
     if method == 'my_recent_swaps':
-        return _respond(req, {'swaps': [], 'from_uuid': None, 'skipped': 0,
-                              'limit': 10, 'total_count': 0})
+        with BOOK_LOCK:
+            act = [dict(s) for s in STATE['active'].values()]
+            hist = [dict(i) for i in STATE['hist']]
+        items = act + hist          # active first, history newest first
+        total = len(items)
+        limit = max(1, int(params.get('limit') or 10))
+        page = max(1, int(params.get('page_number') or 1))
+        paging = {'from_uuid': params.get('from_uuid'), 'skipped': 0,
+                  'limit': limit, 'total': total, 'page_number': page,
+                  'total_pages': 1 if total <= limit else (total + limit - 1) // limit,
+                  'found_records': total}
+        start = (page - 1) * limit
+        items = items[start:start + limit]
+        if _is_v2(req):
+            return _respond(req, {'swaps': items, **paging})
+        # legacy twin: items are MIXED per swap version — V1 items arrive as
+        # MySwapStatusResponse (hide_secrets applied), V2 items FLAT (the
+        # MySwapForRpc struct, no side tag) — lp_swap.rs:1303-1360.
+        legacy_items = []
+        for s in items:
+            legacy_items.append(_legacy_item(s['swap_type'], s['swap_data'])
+                                if s['swap_type'].endswith('V1')
+                                else dict(s['swap_data']))
+        return {'result': {'swaps': legacy_items, **paging}}
 
-    if method == 'my_swap_status' and _is_v2(req):
-        return _respond(req, {'type': 'Taker', 'events': []})
+    if method == 'my_swap_status':
+        # the uuid lives in params on BOTH envelopes (lp_swap.rs:1111 reads
+        # req["params"]["uuid"] even for legacy callers); accept the top
+        # level too so hand-rolled curls behave
+        uuid = params.get('uuid') or (params.get('params') or {}).get('uuid')
+        item = _tagged(uuid)
+        if item is None:
+            if _is_v2(req):
+                return _v2_error('NoSwapWithUuid', 'my_swap_status', uuid)
+            return {'error': 'No swap with uuid %s' % (uuid or '')}
+        if _is_v2(req):
+            return _respond(req, item)
+        if item['swap_type'].endswith('V1'):
+            return {'result': _legacy_item(item['swap_type'], item['swap_data'])}
+        # a V2 swap on the legacy route: FLAT MySwapForRpc (no side tag)
+        return {'result': dict(item['swap_data'])}
 
     if method == 'withdraw' and _is_v2(req):
         return _respond(req, {   # shape pinned live in F1 (v2 withdraw)
@@ -496,11 +798,15 @@ def _canned(req):
     if method == 'send_raw_transaction':
         return _respond(req, {'tx_hash': 'cd' * 32})
 
-    if method == 'stream::orderbook::enable':
+    if method == 'stream::orderbook::enable' and _is_v2(req):
         return {'mmrpc': '2.0', 'result': {'streamer_id': STREAMER_ID}, 'id': None}
 
-    if method == 'stream::disable':
-        return {'mmrpc': '2.0', 'result': {}, 'id': None}
+    # swap_status is a GLOBAL streamer (no uuid/pair suffix — streamer_ids.rs)
+    if method == 'stream::swap_status::enable' and _is_v2(req):
+        return {'mmrpc': '2.0', 'result': {'streamer_id': 'SWAP_STATUS'}, 'id': None}
+
+    if method == 'stream::disable' and _is_v2(req):
+        return {'mmrpc': '2.0', 'result': 'Success', 'id': None}
 
     return _v2_error('NoSuchMethod', 'dispatcher', {'suggestions': [], 'data': [method]})
 

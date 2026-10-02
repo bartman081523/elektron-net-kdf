@@ -132,6 +132,10 @@ async function enable(spec, { silent = false } = {}) {
   await ensureConnected();
   if (spec.kind === 'orderbook') {
     await v2('stream::orderbook::enable', { client_id: s.clientId, base: spec.base, rel: spec.rel });
+  } else if (spec.kind === 'swap-status') {
+    // swap_status is a GLOBAL streamer — one enable covers every swap of the
+    // daemon, frames arrive as SWAP_STATUS {swap_type, swap_data:{uuid,event}}
+    await v2('stream::swap_status::enable', { client_id: s.clientId });
   } else {
     throw new RpcError('unknown stream kind: ' + spec.kind, { type: 'SSE' });
   }
@@ -141,6 +145,24 @@ async function enable(spec, { silent = false } = {}) {
 /** Subscribe to the orderbook of a pair; idempotent per pair. */
 export function orderbook(base, rel) {
   return enable({ kind: 'orderbook', base, rel });
+}
+
+/** Subscribe to swap status (global stream, one per daemon). */
+export function swapStatus() {
+  return enable({ kind: 'swap-status', base: '', rel: '' });
+}
+
+/** Unsubscribe the swap stream (best effort — not fatal). */
+export async function unsubscribeSwapStatus() {
+  const spec = { kind: 'swap-status', base: '', rel: '' };
+  active.delete(keyOf(spec));
+  const s = loadSession();
+  if (!s) return;
+  try {
+    await v2('stream::disable', { client_id: s.clientId, streamer_id: 'SWAP_STATUS' });
+  } catch (e) {
+    /* the streamer may already be gone */
+  }
 }
 
 /** Unsubscribe one pair (best effort — a failed disable is not fatal). */
@@ -160,6 +182,7 @@ export async function unsubscribe(base, rel) {
 export async function unsubscribeAll() {
   for (const spec of [...active.values()]) {
     if (spec.kind === 'orderbook') await unsubscribe(spec.base, spec.rel);
+    else if (spec.kind === 'swap-status') await unsubscribeSwapStatus();
   }
 }
 

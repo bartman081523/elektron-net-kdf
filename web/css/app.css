@@ -382,3 +382,53 @@ tr.spread td {
 td.price { font-weight: 500; }
 .tag.maker { color: var(--accent); border-color: var(--accent-soft); }
 .tag.taker { color: var(--muted); }
+/* ---- swaps (F3) ------------------------------------------------------------
+   Status badges extend .tag (maker/taker): ok up-green, fail red, pending
+   amber. Timeline rows use one accent dot per step; chips carry only the
+   curated event fields the views whitelist (never secret/privkey data). */
+.tag.ok { color: var(--up); border-color: var(--up); }
+.tag.fail { color: var(--err); border-color: var(--err); }
+.tag.pending { color: var(--warn); border-color: var(--warn); }
+
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.chip {
+  font-size: var(--fs-1);
+  font-family: var(--font-num);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 8px;
+  background: var(--panel-2);
+  max-width: 34ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip .chip-k { color: var(--muted); }
+.chip .chip-v { color: var(--text); }
+
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-num);
+  font-size: var(--fs-1);
+}
+.timeline li:last-child { border-bottom: none; }
+.tl-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  align-self: center;
+}
+.timeline li.tl-err .tl-dot { background: var(--err); }
+.timeline li.tl-done .tl-dot { background: var(--up); }
+.timeline .tl-when { color: var(--muted); margin-left: auto; }
+.timeline .tl-err-text { color: var(--err); }
+
+tr.rowlink { cursor: pointer; }
+.rowlink.sel { background: var(--panel-2); }
