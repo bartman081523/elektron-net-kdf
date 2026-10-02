@@ -487,6 +487,71 @@ the full report re-run).
 - Funded Sepolia (SEPOLIAETH) swaps: activation verified, funding not
   yet arranged (public Sepolia faucets, then a trade).
 
+### 9. elek-swap CLI (fork of `mm2src/adex_cli`) (2026-10-02)
+
+`mm2src/elek_swap/`: a thin CLI wrapper that runs alongside the kdf
+service binary, for users who want command-line access to the p2p
+market without hand-writing RPC calls. Workspace member `-p elek-swap`
+(requires the root `Cargo.toml` membership); binary lands next to `kdf`
+in the same target dir. Fork deltas, all build/runtime-verified on
+regtest (port 7798, netid 2, seed 7805):
+
+- `activation_scheme_db/init_activation_scheme.rs`: upstream adex_cli
+  downloads the activation scheme from stats.kmd.io; the fork derives
+  it locally from the `--mm-coins-path` file instead — every coin with
+  an `electrum` server list becomes an `electrum` activation entry.
+  Coins without `electrum` are not activatable through this CLI (they
+  need native node RPC params in the coins file).
+- `Cargo.toml`: consumer-side `chrono` features. Root declares chrono
+  `default-features = false`; in the full workspace the walletconnect
+  members (`pairing_api`, `relay_rpc`) pull in feature `clock`, in the
+  `-p elek-swap` closure nothing does → E0432/E0599 in `common/log.rs`.
+  Fix mirrors upstream's own `mm2_bin_lib:46` pattern:
+  `chrono = { workspace = true, features = ["clock", "std"] }`.
+- `init_activation_scheme.rs`: caller-side imports for
+  `error_anyhow!` — `macro_rules!` expands textually at the call site,
+  so the calling module must import `anyhow!` and `error!` itself
+  (same pattern as `init_mm2_cfg.rs`).
+- Removed dead `stuff` dependency entry.
+
+CLI surface (`cli.rs`): `start` (env `MM_CONF_PATH`/`MM_COINS_PATH`/
+`MM_LOG`, then spawns `kdf` from the binary's own directory — detached,
+non-blocking), `stop` (RPC stop, only the configured URI instance),
+`status`/`kill` (**machine-wide**: list/kill every `kdf` process found
+by name — do not run `kill` on a host that runs other kdf instances),
+`enable`, `balance`, `get-enabled`, `orderbook`, `sell`/`buy`
+(positionals: `base rel volume price`; `--uuid`/`--public` are
+*match* selectors for `match_uuids`/`match_publics`, **not** an
+order-visibility flag), `version`, `init` (interactive passphrase
+prompt, needs a TTY).
+
+Regtest E2E evidence (2026-10-02, all via the CLI + raw RPC):
+build green, 10/10 unit tests green; rELEK/rBTC activation; funding of
+the maker address 100 rELEK via the section 5 documented
+withdraw+send_raw_transaction path (regtest coinbase subsidy is 0 at
+current heights, so mining funds nothing); `sell rELEK rBTC 1.0 10`
+(GTC) became a maker order after the ~30 s taker matching window and
+propagated through the netid-2 seed; a taker on another instance took
+the full order via legacy-typed `buy` (FOK); both sides reported
+`Finished`; balances converged (maker -1 rELEK +10 rBTC, taker +1
+rELEK -10 rBTC, only network fees — no DEX fee on the pair, per
+section 6's policy).
+
+Caveats verified live:
+- A fresh `sell` spends up to 30 s in the taker matching phase; the
+  orderbook only shows it after conversion to maker.
+- `/home/<user>/.config/elek-swap/activation_scheme.json` is rewritten
+  by `cargo test -p elek-swap` (the scheme test writes its fixture to
+  the real config dir). Regenerate the real scheme afterwards.
+- kdf rejects weak rpc passwords at startup (`Password should contain
+  at least 1 uppercase character` etc.) and exits immediately; fixture
+  passwords must satisfy the policy (>=8 chars, one of each class, no
+  3 repeated, no `<>&`).
+- Legacy RPC forms (`orderbook`, `cancel_order`) take their fields at
+  body top level (no `params`), and legacy `orderbook` returns the
+  book top level (no `result` wrapper). `cancel_order` needs the
+  `uuid` at top level.
+
 ## Upstream sync policy
 
 - Manual security ports from upstream `main`; tag
