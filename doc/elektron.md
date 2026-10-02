@@ -460,6 +460,18 @@ Refund + recovery evidence on the testnet legs (records in
    server outage, as long as the chain stack returns before the maker
    locktime.
 
+   Maker-side completion (verified after the fact): the swap was
+   restored in alice's restarted instance (23:50, relogged
+   `MakerPaymentWaitConfirmFailed -> MakerPaymentWaitRefundStarted ->
+   MakerPaymentRefundStarted` immediately on restart) and the refund
+   branch ran unattended at her locktime: `MakerPaymentRefunded ->
+   MakerPaymentRefundFinished -> Finished` at 01:44:51, 19 s past
+   started + 15600 s (01:44:33). Her rELEK live balance is back at
+   969.49985483 (pre-swap 969.49986424; only tx-fee dust missing).
+   d894e4fd therefore closes both kill-test branches: the taker
+   refunded while the maker was dead, and an unattended maker instance
+   refunded immediately at its locktime.
+
 Swap-fee final tally over both result files (swap_fee_report.py): 15
 regtest + 6 testnet green swaps, every one `no_fee=True`, zero
 DEX-fee-to-pubkey script leaks, zero sides unavailable for
