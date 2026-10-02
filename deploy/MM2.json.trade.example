@@ -6,5 +6,7 @@
   "rpcip": "127.0.0.1",
   "rpcport": 7796,
   "dbdir": "/home/<user>/.local/share/kdf/trade1/db",
-  "seednodes": ["<seed-host-lan-or-tailnet-ip>"]
+  "seednodes": ["<seed-host-lan-or-tailnet-ip>"],
+  "rpccors": "http://localhost:3000",
+  "event_streaming_configuration": {}
 }

@@ -577,8 +577,14 @@ Caveats verified live:
   Applied live: `nft list table inet elektron_kdf` shows both rules.
   A functional drop test needs a non-LAN source, which this host cannot
   produce — rule presence is the verification level reached.
-- Coins restore from the instance database after restart, but verify
-  with `get_enabled_coins` and re-activate missing ones. Verified live:
+- Coins do NOT reliably rejoin the enabled set on restart: observed live
+  on both deployed instances (2026-10-02, right after the web-key patch),
+  the restored electrum client re-engaged (its server `connected via
+  TCP` log line) while `get_enabled_coins` kept answering
+  `{"result":{"coins":[]}}` for well over 40s — the coin becomes visible
+  again only once a fresh `electrum` call lands (one call per instance
+  completed activation instantly). Always verify with
+  `get_enabled_coins` and re-activate missing ones. Also verified live:
   the mmrpc-2.0 `electrum` method **does not exist** on this build
   (dispatcher "No such method"), and the mmrpc-2.0 envelope rejects a
   top-level `coin` field — activation is the legacy envelope
@@ -594,6 +600,120 @@ Caveats verified live:
   instances with mainnet-hrp `be1...` addresses against the
   machine-local electrs (192.168.178.21:50002); the elek-swap CLI
   config points at the trade1 RPC.
+
+### 11. Web UI: market SPA + `elek-web` static server (2026-10-02)
+
+Architecture (no proxy, no backend, no accounts — the browser is the
+only client and talks straight to the user's own daemon):
+
+```
+browser (http://localhost:3000, hash router)
+  ├─ GET static files            → elek-web (hyper, loopback :3000)
+  ├─ POST JSON-RPC (CORS)        → kdf (loopback 779x, `rpccors`)
+  └─ GET /event-stream?id=<u64>  → kdf (SSE, unauthenticated)
+```
+
+- `mm2src/elek_web` serves `web/` from disk. hyper + tokio only (the
+  workspace ships no embedding/mime crates, checked at plan time).
+  hardening in `resolve()` (main.rs): no percent-encoding, no `..` or
+  empty path segments, canonicalize + prefix check against the root
+  (symlink/`..` escapes fail), directories are not listed. GET/HEAD
+  only (RPC to the daemon, never to the server). Every response carries
+  `x-elek-web: 1` and `Cache-Control: no-cache`; `.mjs` maps to
+  `text/javascript` (a `octet-stream` MIME would make the browser
+  refuse the ES modules). `MM_WEB_ROOT`/`MM_WEB_ADDR` env, defaults
+  `web` / `127.0.0.1:3000`; deploy unit `deploy/elek-web@.service` +
+  `deploy/kdf-web.env.example`.
+- There is **no WebSocket RPC on this build** (0 hits for
+  orderbook_ws/wsport/accept_async); the live channel is the SSE
+  endpoint `GET /event-stream` (rpc.rs:347-356 →
+  `mm2_net::event_streaming::sse_handler`).
+- **SSE endpoint is unauthenticated** (upstream TODO at rpc.rs:345):
+  whoever can reach the RPC port can READ streamed events
+  (`ORDERBOOK_UPDATE:orbk/<pair>` — the pair in alb-sorted `base:rel`
+  form, e.g. `orbk/rBTC:rELEK` — plus swap status, balance...). Nothing
+  secret is carried in event payloads (orders/swaps of the local net),
+  and enabling or disabling a stream stays behind the rpc password —
+  but a password-holding client can cross-enable events for another
+  (unknown-id) client. Exposure is bounded by the loopback-only RPC
+  bind (`rpcip`) and the tunnel recipe in deploy/README.md; disclosed
+  here because upstream has not made the call yet.
+- Config keys (both live-patched into the deployed MM2.json files):
+  - `rpccors`: single string, the daemon stamps this exact
+    `Access-Control-Allow-Origin` onto every RPC response
+    (rpc.rs:255-264); HTTP default `http://localhost:3000`, HTTPS
+    default `https://localhost:3000`. Browse the UI as
+    `http://localhost:3000` or preflights fail.
+  - `event_streaming_configuration`: its mere PRESENCE turns the SSE
+    endpoint on — without it `/event-stream` answers "Event streaming
+    is disabled" (sse_handler.rs:15-17, `from_value(Null)` fails →
+    None). `{}` is enough on native: `worker_path` is wasm-only
+    (lp_native_dex.rs:365-371), `access_control_allow_origin` defaults
+    to `*` and is stamped on SSE responses (configuration.rs,
+    sse_handler.rs:50-51). Duplicate `?id=` answers 500 "ID already in
+    use" — the SPA's `sse.mjs` picks a random u64 per tab session and
+    retries on collision. The daemon appends a trailing space to each
+    `data:` line (`format!("data: {data} \n\n")`); the mock does not,
+    both parse identically.
+  - SSE stream lifecycle (live-pinned 2026-10-02 on the seed and
+    regtest-alice): a `stream::*::enable` call is only valid for a
+    client that is CURRENTLY connected — enable before the SSE
+    `GET /event-stream?id=N` answers with v2 `UnknownClient`
+    (`error_type EnableError`); enable with a connected id succeeds and
+    echoes the canonical streamer id (`{"streamer_id":
+    "ORDERBOOK_UPDATE:orbk/rBTC:rELEK"}`). There is NO initial snapshot:
+    the first event only arrives with the next book change (a fresh
+    `setprice` produced the first frame; a `stream::disable` after the
+    connection closed answers `UnknownClient` too — the daemon prunes
+    disconnected clients). `stream::heartbeat::enable` requires
+    `params.config` (`{"config": {}}` takes the 5s default,
+    `stream_interval_seconds`); its frames are
+    `data: {"_type":"HEARTBEAT","message":{}}`.
+- Envelope contract (pinned live in phases 3-6 + F1-F4, mirrored in
+  web/test/mock_daemon.py):
+  - v2 envelope (`mmrpc:"2.0"`, everything inside `params`) exists for
+    `version`, `withdraw` (preview; **never broadcasts** — build+sign
+    only, see section 5's two-step), `trade_preimage`,
+    `my_swap_status` (reads `params.uuid` — the one legacy exception),
+    `get_enabled_coins`, `stream::*::enable`.
+  - legacy top-level for everything else: `electrum` (activation;
+    the v2 method does not exist on this build), `disable_coin`,
+    `orderbook`, `sell`/`buy`, `cancel_order` (uuid top-level),
+    `cancel_all_orders`, `my_orders`, `my_balance`, `my_tx_history`,
+    `send_raw_transaction` `{coin, tx_hex}` → `{tx_hash}`,
+    `my_recent_swaps`, `active_swaps`.
+  - error semantics: legacy RPC-level errors answer **HTTP 500 with a
+    JSON body**, v2 errors answer **200 in-band** (`mmrpc: "2.0"` +
+    `error`/`error_data`); the response STATUS is never load-bearing
+    to the client — it parses whichever body arrives.
+  - ticker contract: case-sensitive (test-chain prefixes stay lowercase,
+    `rELEK`/`rBTC`/`tBTC`); no `.toUpperCase()` anywhere in the UI.
+- Sessions: the rpc password lives in `sessionStorage` only (dies with
+  the tab); nothing is stored server-side or in localStorage. The UI
+  holds no trading state — the daemon is the truth (its instance db
+  restores the enabled coin set); the SPA polls as the fallback truth
+  (orderbook ~8 s) and uses SSE as live polish.
+- Degraded states are design product, not afterthought: every view
+  paints an `error` block inside its table holder on RPC failure, the
+  coins view additionally paints its last-known table labelled STALE
+  (error banner above it) once it has seen a list, and the add-coin
+  form stays usable while the daemon is down. Verified for mock modes
+  err/empty/slow and a killed daemon on all five views
+  (CDP sweep harness; the harness files live in /tmp, not the repo).
+- `web/test/mock_daemon.py`: stdlib-only mock of RPC + SSE for UI
+  iteration without a daemon, with four falsification modes
+  (`ok`/`err`/`empty`/`slow`) settable at runtime
+  (`mock.set_mode`); its shapes were corrected against the live
+  regtest daemon, never the other way round. The selftest page
+  (`/selftest.html`) asserts the contract in-page against whichever
+  RPC URL it is pointed at; the dev-autologin query
+  (`#/connect?dev-url=…&dev-pass=…&next=<view>`) is a test-only
+  convenience (the password lands in sessionStorage, not the repo).
+- Deployed live: elek-web built release (`-p elek-web`), installed at
+  `%h/.local/bin/elek-web`, unit `elek-web@web` running with
+  `MM_WEB_ROOT` at the checkout's `web/`; both deployed MM2.json files
+  patched with the two keys and the daemons restarted (see
+  deploy/README.md "Web UI").
 
 ## Upstream sync policy
 

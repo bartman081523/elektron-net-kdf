@@ -1,0 +1,19 @@
+[Unit]
+Description=elek-web (static market web UI, instance %i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# per-instance EnvironmentFile: ~/.config/kdf/%i.env defines MM_WEB_ROOT
+# (the web/ directory of the fork checkout) and MM_WEB_ADDR.
+# NB: systemd does not expand ${VAR} in the ExecStart executable path
+# (same constraint as kdf@.service), so the binary lives at a fixed
+# specifier-resolved location. Install it with:
+#   install -m0755 <release-dir>/elek-web ~/.local/bin/elek-web
+EnvironmentFile=%h/.config/kdf/%i.env
+ExecStart=%h/.local/bin/elek-web
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

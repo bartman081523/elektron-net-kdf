@@ -7,5 +7,7 @@
   "rpcport": 7795,
   "dbdir": "/home/<user>/.local/share/kdf/seed/db",
   "is_bootstrap_node": true,
-  "i_am_seed": true
+  "i_am_seed": true,
+  "rpccors": "http://localhost:3000",
+  "event_streaming_configuration": {}
 }
