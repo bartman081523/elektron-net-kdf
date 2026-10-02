@@ -314,3 +314,71 @@ tr.row-error td:first-child { color: var(--err); }
 .st-warn .st-tag { color: var(--warn); }
 .st-info .st-tag { color: var(--muted); }
 .pass-line { color: var(--up); }
+
+/* ---- market view additions (F2) ---- */
+.pair-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+.pair-row select { width: 130px; }
+
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block;
+  background: var(--accent);
+  margin-right: 2px;
+  animation: pulse var(--dur-2) var(--ease) infinite alternate;
+}
+@keyframes pulse {
+  from { opacity: 0.35; }
+  to   { opacity: 1; }
+}
+
+tr.spread td {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  text-align: center;
+  color: var(--muted);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--panel-2);
+}
+
+.book-totals {
+  padding: var(--sp-2) 0 0;
+  font-size: var(--fs-1);
+}
+
+/* segmented buttons (side / mode toggles) */
+.seg { display: flex; gap: var(--sp-1); }
+.seg .seg-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-1);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.seg .seg-btn:hover { color: var(--text); background: var(--panel-2); }
+.seg .seg-btn.active {
+  color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.seg .seg-btn.sell.active { color: var(--down); border-color: var(--down); }
+.seg .seg-btn.buy.active { color: var(--up); border-color: var(--up); }
+
+.fee-preview {
+  font-size: var(--fs-1);
+  margin: var(--sp-2) 0;
+  min-height: 1.2em;
+}
+
+td.price { font-weight: 500; }
+.tag.maker { color: var(--accent); border-color: var(--accent-soft); }
+.tag.taker { color: var(--muted); }

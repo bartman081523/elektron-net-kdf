@@ -27,13 +27,16 @@ const setState = (s) => {
 
 const keyOf = (spec) => `${spec.kind}:${spec.base}:${spec.rel}`;
 
-/** The alphabetically sorted pair form used in streamer ids (orbk:<ALB>). */
+/** The alphabetically sorted pair form used in topics and streamer ids
+ * (pub_sub_topic(ORDERBOOK_PREFIX="orbk", alb_ordered_pair) -> "orbk/ELEK:tBTC"). */
 export function albPair(base, rel) {
   return [base, rel].sort().join(':');
 }
 
+/** Live streamer id form, pinned on regtest: "ORDERBOOK_UPDATE:orbk/rBTC:rELEK"
+ * (enable response + observed SSE frames). */
 export function streamerId(base, rel) {
-  return 'ORDERBOOK_UPDATE:orbk:' + albPair(base, rel);
+  return 'ORDERBOOK_UPDATE:orbk/' + albPair(base, rel);
 }
 
 function handleMessage(ev) {
@@ -102,6 +105,13 @@ async function reboot() {
   saveSession(s);
   const specs = [...active.values()];
   active.clear();
+  // reconnect first — the server must know the new id before enables (see enable())
+  try {
+    await openEvents(s);
+  } catch (e) {
+    emit('toast', { msg: 'event stream reconnect failed: ' + e.message, kind: 'err' });
+    return;
+  }
   for (const spec of specs) {
     try {
       await enable(spec, { silent: true });
@@ -115,12 +125,16 @@ async function enable(spec, { silent = false } = {}) {
   const s = loadSession();
   if (!s) throw new RpcError('not connected (no session)', { type: 'Session' });
   active.set(keyOf(spec), spec);
+  // The server learns the client id ONLY through the open GET /event-stream
+  // connection (new_client on GET; the manager answers UnknownClient to an
+  // enable for a client it has not seen — pinned live in F2 on regtest).
+  // Open the transport FIRST, then register the stream.
+  await ensureConnected();
   if (spec.kind === 'orderbook') {
     await v2('stream::orderbook::enable', { client_id: s.clientId, base: spec.base, rel: spec.rel });
   } else {
     throw new RpcError('unknown stream kind: ' + spec.kind, { type: 'SSE' });
   }
-  await ensureConnected();
   if (!silent) setState(es && es.readyState <= 1 ? 'ok' : 'error');
 }
 

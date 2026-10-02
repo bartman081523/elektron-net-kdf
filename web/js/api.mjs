@@ -126,13 +126,25 @@ export const myOrders = () => legacy('my_orders');
 export const cancelOrder = (uuid) => legacy('cancel_order', { uuid });
 export const cancelAllOrders = (cancelBy = { type: 'All' }) =>
   legacy('cancel_all_orders', { cancel_by: cancelBy });
-export const placeOrder = ({ side, base, rel, price, volume, minVolume = undefined, orderType = 'GoodTillCancelled' }) =>
-  legacy(side, {
+// Maker placement is `setprice` (lp_ordermatch.rs create_maker_order): the
+// order enters the maker book via the P2P MAKER_ORDER_CREATED loopback.
+// `sell`/`buy` are TAKER-only in this daemon (lp_auto_buy -> TakerOrderBuilder,
+// lp_ordermatch.rs:4709): they never touch the book; a GTC taker order rests
+// in my_orders.taker_orders until it matches an incoming maker order.
+export const setPrice = ({ base, rel, price, volume, minVolume = undefined, orderType = 'GoodTillCancelled' }) =>
+  legacy('setprice', {
     base, rel, price, volume,
     min_volume: minVolume,
     order_type: { type: orderType },
   });
-export const orderStatus = (uuid) => legacy('order_status', { order_id: uuid });
+export const takerOrder = ({ side, base, rel, price, volume, orderType = 'GoodTillCancelled' }) =>
+  legacy(side, {
+    base, rel, price, volume,
+    order_type: { type: orderType },
+  });
+// OrderStatusReq carries `uuid` (lp_ordermatch.rs:5765); the response is
+// {"result": {type: "Maker"|"Taker", order}}.
+export const orderStatus = (uuid) => legacy('order_status', { uuid });
 // legacy withdraw takes the whole body (dispatcher_legacy.rs); the UI uses v2:
 export const withdraw = (p) => v2('withdraw', p);
 export const sendRaw = (coin, txHex) => legacy('send_raw_transaction', { coin, tx_hex: txHex });
