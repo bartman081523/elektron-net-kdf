@@ -77,10 +77,11 @@ Commits `916da1c` + `dafd7eb`.
 - `coins/upstream_coins` is a frozen snapshot of the upstream coins
   repository (782 entries), `coins/elektron_overlay.json` is the fork's
   overlay, and `scripts/elektron/coins_merge.py` generates
-  `coins/elektron_coins` (786 entries) deterministically.
+  `coins/elektron_coins` (787 entries) deterministically.
 - Overlay tickers: `ELEK` (hrp `be`), `tELEK` (hrp `tb`), `rELEK`
-  (hrp `bcrt`), `rBTC` (hrp `bcrt`, own elektrond regtest); all segwit,
-  `address_format` segwit, `mature_confirmations` 1.
+  (hrp `bcrt`), `rBTC` (hrp `bcrt`, own elektrond regtest), `tBTC`
+  (public Bitcoin testnet3); all UTXO entries segwit, `address_format`
+  segwit, `mature_confirmations` 1 except tBTC (100, testnet3 rules).
 - `scripts/elektron/coins_runtime.py` injects machine-local settings
   (`--confpath TICKER=PATH` for native mode, `--rpcport TICKER=PORT`)
   into a runtime coins file; those values never enter the repo.
@@ -359,10 +360,120 @@ payments keep their refund retries across restarts and complete at
 locktime expiry while the instance is up; an expired maker payment
 refunds immediately after restart (swap f4679a0e, shape 3).
 
-## Planned (NOT implemented)
+### 8. Testnet layer: private ELEK testnet + swaps + refunds (2026-10-01)
 
-- Testnet swaps: public BTC testnet electrum servers + ELEK testnet +
-  optional ETH Sepolia.
+The testnet layer reuses the regtest harness core (`swap_rpc.py`) with a
+testnet coin set and two drivers of its own (`testnet_swap_e2e.py`,
+`testnet_rpc.py` for activation helpers, `testnet_fund.py` for funding;
+node/electrs bring-up in `testnet_up.sh`). Coin set: `tELEK` (private
+Elektron testnet chain "etn1", real testnet genesis and PoW retargeting,
+60 s target spacing, 100-block coinbase maturity, its own electrs
+instance), `rBTC`/`rELEK` (the kept regtest legs) and `tBTC` (public
+Bitcoin testnet3 via upstream electrum servers, overlay entry).
+
+Chain bring-up facts (`testnet_up.sh`, verified live):
+
+- elektrond clears the seed list on testnet (`CTestNetParams`), so the
+  chain is single-node and mined by a local loop (machine-local
+  `testnet_miner.py`, never committed).
+- Initial mining REQUIRES an explicit high `maxtries`: at genesis
+  difficulty the target is 2^231 (~33.5M hashes per block) while the
+  default sweep is capped at 1e6 attempts, and the fork's
+  `GenerateBlock` breaks SILENTLY on a failed sweep (no RPC error) --
+  `generatetoaddress [..., 1000000000]` is the working form.
+- A young chain has no mempool fee history: the wallet estimator returns
+  nothing and `sendtoaddress` aborts with "Fee estimation failed.
+  Fallbackfee is disabled" (code -6). The fork has no `settxfee` RPC;
+  the working paths are `-fallbackfee` in the node config or a named
+  `fee_rate` (atom/vB) argument on `sendtoaddress` in object-params
+  form (`{"address": ..., "amount": ..., "fee_rate": 1}`), which is what
+  `testnet_fund.py` uses. 1 atom/vB matches the coins-file txfee.
+
+Runtime behaviour verified on this layer:
+
+- Coins activation on the testnet legs uses upstream public electrum
+  servers for tBTC (no funding required for activation):
+  `tELEK`/`tBTC` activate on both instances; SEPOLIAETH activates via
+  legacy `enable` with the test helper's RPC urls
+  (sepolia.drpc.org et al.) and the upstream test swap contract
+  `0xeA6D65434A15377081495a9E7C5893543E7c32cB` -> address + balance 0.
+- "mm2 param is not set neither in coins config nor enable request"
+  (`lp_coins.rs` coins_conf_check) is NOT evidence against the coins
+  file: when the ticker is absent from the LOADED registry at all, the
+  same error fires. It is therefore a stale-process symptom -- the
+  first tBTC blocker here was an old kdf instance still holding a coins
+  file from before the overlay entry existed. Check the process owning
+  the RPC port, not only the file on disk.
+- Mixed-chain swaps run green across chains and roles:
+  4x bob-as-maker tELEK->rBTC (records 1-3 + one earlier unrecorded
+  run) and 3x alice-as-maker rELEK->tELEK (records 7-9 of
+  `$TL_ROOT/runs/swap-results-testnet.jsonl`), volumes 10 at price
+  0.001 / 1. All balance deltas reconcile to the vol minus miner fees.
+- `trade_preimage` on tELEK/rBTC reports base_coin_fee + rel_coin_fee
+  (miner fees, the rel fee flagged paid_from_trading_vol) and NO dex
+  fee entry, consistent with section 6's NoFee policy on elektron
+  pairs.
+
+Refund + recovery evidence on the testnet legs (records in
+`$TL_ROOT/runs/refund-results-testnet.jsonl`):
+
+1. Kill + restart mid-swap, cooperative completion (swap 6591a540,
+   `refund_r2t.py` run 1; taker_refund_ok=false by design of the
+   record): alice (maker) is SIGKILLed at `MakerPaymentSent` (trigger:
+   bob's `MakerPaymentWaitConfirmStarted`, miner frozen for the window
+   then resumed); the restarted instance kickstarts the restored swap
+   and completes it green -- bob's events carry the full success chain
+   ending `TakerPaymentSpent -> MakerPaymentSpent ->
+   MakerPaymentSpendConfirmed -> Finished`, both sides Successful, and
+   bob learned the secret from alice's on-chain claim tx, not from the
+   dead instance. Same restart-resume shape as regtest scenario 4,
+   now proven across a testnet/regtest mix.
+2. Maker stays dead -> taker locktime refund (swap d894e4fd): same
+   kill window, but the maker instance stays down; the taker refunds
+   his own tELEK payment at the taker locktime (started_at + 7800 s).
+   Bob's full event chain:
+   `Started -> Negotiated -> TakerFeeSent (empty: no dex fee on
+   elektron pairs) -> TakerPaymentInstructionsReceived ->
+   MakerPaymentReceived -> MakerPaymentWaitConfirmStarted ->
+   MakerPaymentValidatedAndConfirmed -> TakerPaymentSent (real P2SH
+   HTLC tx) -> WatcherMessageSent -> TakerPaymentWaitForSpendFailed ->
+   TakerPaymentWaitRefundStarted -> TakerPaymentRefundStarted ->
+   TakerPaymentRefunded (real refund tx with CLTV-input signature) ->
+   TakerPaymentRefundFinished -> Finished`. `taker_refund_ok: true`
+   in the record; bob's tELEK live balance after recovery is
+   19.99997879 (pre-swap 19.99998548 -- the 10 are back, cost is the
+   payment + refund tx fees, ~669 atoms). The record's `post` balance
+   fields understate the truth: they were captured during a mid-refund
+   infra outage (see below); live balances after recovery are
+   authoritative. Alice's 10 rELEK stay in the maker HTLC until her
+   locktime (started_at + 15600 s), refundable after that.
+
+   Infra outage inside the refund window (recorded honestly): both the
+   testnet elektrond and its electrs instance terminated at 22:32
+   (clean `Shutdown done` daemon shutdowns, no OOM evidence, no reboot,
+   root cause of the signal wave unidentified), exactly while bob was
+   between `TakerPaymentRefundStarted` and broadcast confirmation.
+   The swap protocol weathered it: kdf retried the electrum transport
+   every 30 s (`can_refund_htlc` retry loop) and completed the refund
+   as soon as the electrs instance was brought back -- no state loss,
+   no re-negotiation. Property proven: a taker refund survives a total
+   server outage, as long as the chain stack returns before the maker
+   locktime.
+
+Swap-fee final tally over both result files (swap_fee_report.py): 15
+regtest + 6 testnet green swaps, every one `no_fee=True`, zero
+DEX-fee-to-pubkey script leaks, zero sides unavailable for
+verification (the three regtest `UNVERIFIED` entries from the earlier
+partial run resolved once the killed alice instance was restarted and
+the full report re-run).
+
+
+- Funded swaps on public testnet chains: tBTC volume via public
+  faucets is impractical today (dispenses <=0.001 per request with
+  per-IP caps); swaps on tBTC/sepolia legs need a funded tap first.
+  All public-chain coin activation paths are verified (section 8).
+- Funded Sepolia (SEPOLIAETH) swaps: activation verified, funding not
+  yet arranged (public Sepolia faucets, then a trade).
 
 ## Upstream sync policy
 
