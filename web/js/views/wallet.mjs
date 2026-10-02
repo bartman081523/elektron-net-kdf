@@ -23,7 +23,7 @@ export function render(root) {
         <section class="panel">
           <div class="panel-head"><h3>balances</h3>
             <span id="w-note" class="muted"></span></div>
-          <div id="w-table" class="state loading">loading balances…</div>
+          <div id="w-table"><div class="state loading">loading balances…</div></div>
         </section>
         <section class="panel" id="w-send-panel" hidden>
           <div class="panel-head"><h3>send <span id="w-send-coin" class="muted"></span></h3></div>

@@ -63,6 +63,9 @@ file — the mock must never be allowed to "validate" an invented contract.
 
 - legacy top-level vs v2 `params` + the v2 error form mirror
   doc/elektron.md section 9 and the live activations of phases 5/6.
+- RPC-level LEGACY errors answer HTTP 500 WITH a json body; v2 error forms
+  answer 200 in-band (both pinned live on the regtest daemon) — the mock
+  mirrors this: every legacy `{"error": …}` body leaves as a 500.
 - `orderbook` items carry `is_mine`/`address`; SSE items don't (real
   OrderbookP2PItem has no such fields).
 - the SSE `?id=` defaults to 0 in the real daemon (sse_handler.rs) — two
@@ -106,6 +109,43 @@ view accepts both and derives status from the daemon's own semantics:
   The view renders curated fields only (coins, amounts, step names,
   tx-hash cuts, error text) — the regtest harness asserts the real secret
   hash is present in the RPC answer but never in the DOM.
+
+## Coins (F4) — verified against the mock and the regtest daemon
+
+Activation is the **legacy `electrum` envelope** (the v2 method does not exist
+on this build, doc/elektron.md section 10) and `disable_coin` is legacy
+top-level. `get_enabled_coins` is the only truth — the view never uses an
+activation answer's body.
+
+Pinned wire shapes (live regtest, alice :7793):
+
+| call                            | answer shape (pinned)                                                                 |
+|---------------------------------|---------------------------------------------------------------------------------------|
+| `electrum` success (cold coin)  | HTTP 200, BARE `{result:"success", address, balance, unspendable_balance, coin, required_confirmations, requires_notarization, mature_confirmations}` ~16ms |
+| `electrum` already-initialized  | HTTP 500 legacy string `…lp_coins:5231] Coin <T> already initialized` — harmless, no-op |
+| `electrum` first call, cold daemon | HTTP 500 **empty body** — an empty 500 cannot be told apart from a starting coin: poll for truth |
+| `electrum` unknown ticker       | HTTP 500 legacy string `rpc:198] RPC call failed: legacy:144] lp_coins:6249] mm2 param is not set neither in coins config nor enable request…` (~1-7ms — the daemon treats an unknown ticker as an UNSET param; it never names the coin) |
+| `disable_coin` success          | HTTP 200 WRAPPED `{result:{coin, cancelled_orders:[], passivized:false}}` ~100ms        |
+| `disable_coin` unknown coin     | HTTP 500 `{"error":"No such coin: NoSuchCoin!!","orders":{…},"active_swaps":[]}`        |
+| `get_enabled_coins` entries     | `{"ticker":…,"address":…}` ONLY — nothing else (no balance, no rpcport)                |
+
+- **Ticker contract**: real tickers are case-sensitive, lower-case-prefixed on
+  the test chains (`rELEK`, `rBTC`, `tBTC`) — no forced uppercasing anywhere in
+  the UI or mock; the add form accepts `2-20` `[A-Za-z0-9]`.
+- **Activation is fire-and-poll** (the same pattern as
+  scripts/elektron/testnet_rpc.py): repeat the `electrum` call on a 3s cadence
+  and check `get_enabled_coins`, up to 90s, because the response body proves
+  nothing (empty 500 on a cold daemon, "already initialized" on a warm one).
+  The daemon also restores its enabled set from its instance db on restart —
+  there is no available-coins RPC, so the view's ticker list is a curated
+  preset (mirroring testnet_rpc.py SERVERS + the deployed ELEK electrs of the
+  doc) plus tab-local custom entries.
+- **Degraded states**: a failed `get_enabled_coins` paints an error block —
+  alone when no list was ever seen, above the last known table otherwise
+  (stale beats blank, but labelled); the add form and refresh never become
+  unusable. Verified for mock `err`/`empty`/`slow`/daemon-down on ALL views
+  and for same-document revisits (a CDP `Page.navigate` between hash URLs is
+  same-document — module state survives and the stale paint is labelled).
 
 ## Daemon gotchas (regtest evidence)
 

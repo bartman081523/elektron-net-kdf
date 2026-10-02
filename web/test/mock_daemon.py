@@ -32,6 +32,10 @@ F1/F2 (probes + lp_ordermatch.rs source reads; doc/elektron.md sections 9-11):
   pairs, created_at in SECONDS, no is_mine) — the UI treats every event as a
   dirty flag and re-polls, so exact rat values are cosmetic here.
 - RemovedItem's order_data is the bare uuid.
+- coins are STATE-driven: legacy `electrum` activates (adding a fake entry +
+  canned balance), legacy `disable_coin` removes; get_enabled_coins is the
+  read side. The FIRST electrum call per ticker answers an empty 500 once —
+  the live first-call shape the real UI must tolerate and retry past.
 
 Known deviations from the real daemon (kept provisional, marked in code):
 - maker_orders value shape (MakerOrderForMyOrdersRpc) is a plausible
@@ -53,6 +57,7 @@ CORS is wide open (*) so the SPA on http://localhost:3000 can talk to it.
 
 import argparse
 import json
+import re
 import threading
 import time
 from decimal import Decimal
@@ -290,6 +295,22 @@ STATE = {
     'active': {},
     # history: newest first, same tagged form as the v2 API returns
     'hist': [],
+    # ticker -> enabled-coins entry (electrum/disable_coin mutate this;
+    # get_enabled_coins reads it). The live answer carries ONLY ticker+address
+    # (pinned regtest 2026-10-02) — no coin/rpcport siblings.
+    'coins': {
+        'ELEK': {'ticker': 'ELEK', 'address': MY_ADDRESS},
+        'tBTC': {'ticker': 'tBTC', 'address': 'tb1qmocktbtcaddress00000000000000000000'},
+    },
+    # ticker -> {'balance','unspendable_balance'} for the BARE my_balance;
+    # coins activated via electrum join with a canned balance below.
+    'balances': {
+        'ELEK': {'balance': '231.4567', 'unspendable_balance': '0'},
+        'tBTC': {'balance': '0.5', 'unspendable_balance': '0'},
+    },
+    # electrum first-call-500 bookkeeping (one empty 500 per ticker, like a
+    # cold daemon sometimes answers on the first activation call)
+    'electrum_seen': set(),
 }
 
 
@@ -580,16 +601,73 @@ def _canned(req):
     if guard is not None:
         return guard
 
-    coins = [
-        {'ticker': 'ELEK', 'coin': 'ELEK', 'address': MY_ADDRESS, 'rpcport': 7796},
-        {'ticker': 'tBTC', 'coin': 'tBTC', 'address': 'tb1qmocktbtcaddress00000000000000000000', 'rpcport': 18332},
-    ]
-
     if method == 'version':
         return _respond(req, '3.0.0-beta_mock')
 
     if method == 'get_enabled_coins':
-        return _respond(req, coins)
+        with BOOK_LOCK:
+            return _respond(req, list(STATE['coins'].values()))
+
+    if method == 'electrum':
+        # legacy envelope ONLY (doc/elektron.md section 10: no v2 electrum on
+        # this build; top-level coin/servers/required_confirmations). Faithful
+        # cold-daemon behavior: the FIRST activation call for a ticker answers
+        # the real empty-500 shape once — get_enabled_coins is the truth after
+        # that. The success body is placeholder-ish (provisional; the real
+        # success form is unpinned and the UI never reads it — it polls).
+        coin = params.get('coin') or req.get('coin') or ''
+        confs = (params.get('required_confirmations')
+                 if params.get('required_confirmations') is not None
+                 else req.get('required_confirmations'))
+        # real tickers are case-sensitive and lowercase-prefixed on the test
+        # chains (rELEK, rBTC, tBTC) — uppercase-only would reject them (live
+        # evidence: the first harness run never activated rELEK)
+        if not re.match(r'^[A-Za-z0-9]{2,20}$', str(coin)):
+            # live-pinned (regtest 2026-10-02): an unknown ticker is NOT
+            # named — the daemon answers the missing-param legacy string
+            return {'error': 'rpc:198] RPC call failed: legacy:144] '
+                             'lp_coins:6249] mm2 param is not set neither in '
+                             'coins config nor enable request, assuming that '
+                             'coin is not supported'}
+        with BOOK_LOCK:
+            first = str(coin) not in STATE['electrum_seen']
+            STATE['electrum_seen'].add(str(coin))
+            if not STATE['coins'].get(coin):
+                # same shape as the pinned live answer: ticker+address ONLY
+                STATE['coins'][coin] = {
+                    'ticker': coin,
+                    'address': 'be1qelec%s000000000000' % str(coin).lower()[:12],
+                }
+                STATE['balances'].setdefault(
+                    coin, {'balance': '0.5', 'unspendable_balance': '0'})
+        if first:
+            return ('__EMPTY_500__', None)   # real first-call shape (live evidence)
+        # PINNED live (regtest 2026-10-02): the activation answer is BARE —
+        # result:"success" as a FIELD plus the coin state as siblings
+        return {
+            'result': 'success', 'address': STATE['coins'][coin]['address'],
+            'balance': str(Decimal(STATE['balances'].get(coin, {'balance': '0'})['balance'])),
+            'unspendable_balance': '0', 'coin': coin,
+            'required_confirmations': confs or 2,
+            'requires_notarization': False, 'mature_confirmations': 1,
+        }
+
+    if method == 'disable_coin':
+        # legacy top-level coin; an unknown ticker must error. PINNED live
+        # (regtest 2026-10-02): the success form is wrapped
+        # {"result": {coin, cancelled_orders, passivized}} and answers after
+        # the coin stopped (~100ms); the real one also CANCELS the coin's
+        # maker orders — the canned book is not tied to activation here.
+        coin = params.get('coin') or req.get('coin') or ''
+        with BOOK_LOCK:
+            if coin not in STATE['coins']:
+                # live-pinned (regtest 2026-10-02): the error string inlines the
+                # ENUM name, not the requested ticker, plus status siblings
+                return {'error': 'No such coin: NoSuchCoin!!',
+                        'orders': {'matching': [], 'cancelled': []},
+                        'active_swaps': []}
+            STATE['coins'].pop(coin, None)
+        return _respond(req, {'coin': coin, 'cancelled_orders': [], 'passivized': False})
 
     if method == 'trade_preimage':
         # v2 shape pinned live on regtest (F1/F2, 2026-10-02): base_coin_fee/
@@ -608,13 +686,16 @@ def _canned(req):
         })
 
     if method == 'my_balance':
-        # BARE on the real daemon (no "result" wrapper) — do not wrap
+        # BARE on the real daemon (no "result" wrapper) — do not wrap;
+        # an inactive coin errors (activation-first contract)
         coin = params.get('coin') or req.get('coin')
-        if coin == 'ELEK':
-            return {'coin': 'ELEK', 'balance': '231.4567',
-                    'unspendable_balance': '0', 'address': MY_ADDRESS}
-        return {'coin': coin, 'balance': '0.5', 'unspendable_balance': '0',
-                'address': coins[1]['address']}
+        with BOOK_LOCK:
+            st = STATE['coins'].get(coin)
+            if st is None:
+                return {'error': 'my_balance: %s is not enabled' % coin}
+            b = STATE['balances'].get(coin, {'balance': '0', 'unspendable_balance': '0'})
+        return {'coin': coin, 'balance': b['balance'],
+                'unspendable_balance': b['unspendable_balance'], 'address': st['address']}
 
     if method == 'orderbook':
         # BARE on the real daemon (no "result" wrapper) — do not wrap
@@ -965,6 +1046,12 @@ class Handler(BaseHTTPRequestHandler):
             self._cors()
             self.send_header('Content-Length', '0')
             self.end_headers()
+            return
+        if (isinstance(resp, dict) and 'error' in resp and 'result' not in resp
+                and resp.get('mmrpc') != '2.0'):
+            # legacy RPC-level errors answer 500 WITH a json body — pinned
+            # live (the v2 error form is in-band and stays 200)
+            self._send_json(500, resp)
             return
         self._send_json(200, resp)
 

@@ -183,6 +183,20 @@ async function run() {
     return 'withdraw accepted an invalid target — WARN';
   }, { expectFail: true, infoLevel: true });
 
+  // 10b coins error channel: activating a ticker that cannot exist must be
+  // rejected — an invalid charset can never be a config coin, so nothing
+  // stateful happens on either the mock or the real daemon.
+  await step('electrum invalid ticker (error channel)', async () => {
+    await legacy('electrum', { coin: 'NoSuchCoin!!', servers: [{ url: '127.0.0.1:99999' }] });
+    return 'a daemon accepted an invalid-ticker activation — WARN';
+  }, { expectFail: true, infoLevel: true });
+
+  // 10c disable_coin error channel: deactivating an unknown ticker must error
+  await step('disable_coin unknown ticker (error channel)', async () => {
+    await legacy('disable_coin', { coin: 'NoSuchCoin!!' });
+    return 'disable_coin accepted an unknown ticker — WARN';
+  }, { expectFail: true, infoLevel: true });
+
   // 11 SSE round-trip: enable a stream, count events for 3s, unsubscribe.
   // Needs event_streaming_configuration on a real daemon; without it the
   // endpoint 500s (recorded, not fatal). SKIPPED in auto mode (headless

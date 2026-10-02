@@ -166,3 +166,6 @@ export const recentSwaps = (filter = {}, paging = {}) =>
   v2('my_recent_swaps', { ...filter, ...paging });
 export const electrum = (coin, servers, confs = 2) =>
   legacy('electrum', { coin, servers, required_confirmations: confs, mature_confirmations: 1 }, 180000);
+// deactivation answers only after the coin is actually stopped (dispatcher awaits);
+// get_enabled_coins is the poll truth afterwards (coins view).
+export const disableCoin = (coin) => legacy('disable_coin', { coin });
