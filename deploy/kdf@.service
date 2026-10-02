@@ -5,9 +5,12 @@ Wants=network-online.target
 
 [Service]
 # per-instance EnvironmentFile: ~/.config/kdf/%i.env defines
-# KDF_BIN, RUST_LOG, MM_LOG, MM_COINS_PATH, MM_CONF_PATH
+# RUST_LOG, MM_LOG, MM_COINS_PATH, MM_CONF_PATH
+# NB: systemd does not expand ${VAR} in the ExecStart executable path,
+# so the binary lives at a fixed specifier-resolved location. Install it
+# with: install -m0755 <release-dir>/kdf ~/.local/bin/kdf
 EnvironmentFile=%h/.config/kdf/%i.env
-ExecStart=${KDF_BIN}
+ExecStart=%h/.local/bin/kdf
 Restart=always
 RestartSec=10
 

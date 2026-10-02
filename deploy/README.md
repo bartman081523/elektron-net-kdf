@@ -19,11 +19,15 @@ Deployment layer for running the fork as long-lived services. No Docker
 # build (memory discipline: CARGO_TARGET_DIR out of the repo tree)
 cd <fork checkout> && CARGO_TARGET_DIR=/run/.../kdf-release-target cargo build --workspace
 
+# binary on an always-mounted path (the unit runs %h/.local/bin/kdf;
+# systemd does not expand ${VAR} in the ExecStart executable path)
+install -m0755 <dir>/kdf-release-target/release/kdf ~/.local/bin/kdf
+
 # unit + env
 cp deploy/kdf@.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 
-# one env file per instance (adapts KDF_BIN / MM_COINS_PATH / MM_CONF_PATH)
+# one env file per instance (adapts MM_COINS_PATH / MM_CONF_PATH)
 mkdir -p ~/.config/kdf
 cp deploy/kdf.env.example ~/.config/kdf/seed.env
 
