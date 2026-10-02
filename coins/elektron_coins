@@ -4833,7 +4833,13 @@
     "mm2": 1,
     "protocol": {
       "type": "UTXO"
-    }
+    },
+    "electrum": [
+      {
+        "url": "192.168.178.21:50002",
+        "protocol": "TCP"
+      }
+    ]
   },
   {
     "coin": "ELF-BEP20",
@@ -17210,7 +17216,13 @@
     "mm2": 1,
     "protocol": {
       "type": "UTXO"
-    }
+    },
+    "electrum": [
+      {
+        "url": "127.0.0.1:50004",
+        "protocol": "TCP"
+      }
+    ]
   },
   {
     "coin": "rELEK",
@@ -17237,7 +17249,13 @@
     "mm2": 1,
     "protocol": {
       "type": "UTXO"
-    }
+    },
+    "electrum": [
+      {
+        "url": "127.0.0.1:50003",
+        "protocol": "TCP"
+      }
+    ]
   },
   {
     "coin": "tBCH",
@@ -17350,7 +17368,13 @@
     "mm2": 1,
     "protocol": {
       "type": "UTXO"
-    }
+    },
+    "electrum": [
+      {
+        "url": "192.168.178.21:50005",
+        "protocol": "TCP"
+      }
+    ]
   },
   {
     "coin": "tQTUM",
