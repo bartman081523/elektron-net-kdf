@@ -669,6 +669,22 @@ browser (http://localhost:3000, hash router)
     `params.config` (`{"config": {}}` takes the 5s default,
     `stream_interval_seconds`); its frames are
     `data: {"_type":"HEARTBEAT","message":{}}`.
+  - Auto-connect handoff: with `MM_WEB_RPC_URL` + `MM_WEB_RPC_PASS` in
+    elek-web's env, the static server serves
+    `{"rpc_url": …, "rpc_pass": …}` at `/elek-web-config.json` (404
+    without the pair) and the SPA's boot fetch
+    (`tryAutoConnect`, `web/js/main.mjs`) probes the daemon and saves
+    the session — the connect form disappears from live operation.
+    Precedence in the SPA: existing tab session > dev-autologin query >
+    this endpoint; a failed probe or missing pair falls back to the
+    connect form, and "forget this daemon" disconnects for the tab only
+    (the next reload auto-connects again). Disclosed trust model: this
+    publishes the daemon's rpc password to every browser that can reach
+    the static server — acceptable under the loopback/ssh-tunnel-only
+    deployment, invalid if port 3000 is ever opened to the network.
+    Verified live (plain `http://localhost:3000` visit: session +
+    `#/orderbook`, no form; the dev-autologin test harnesses stay green
+    because the dev query outranks the endpoint).
 - Envelope contract (pinned live in phases 3-6 + F1-F4, mirrored in
   web/test/mock_daemon.py):
   - v2 envelope (`mmrpc:"2.0"`, everything inside `params`) exists for

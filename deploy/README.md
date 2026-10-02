@@ -66,6 +66,18 @@ GET/HEAD only, loopback only); the SPA POSTs JSON-RPC to the daemon
 entered in the connect form and reads events from its unauthenticated
 `/event-stream` (details in doc/elektron.md section 11).
 
+Auto-connect removes the form from live operation: with
+`MM_WEB_RPC_URL`/`MM_WEB_RPC_PASS` in the unit's env file, elek-web
+serves the pair at `/elek-web-config.json` and the SPA connects at boot,
+landing on the market view (verified live: plain `http://localhost:3000`
+visit, session + `#/orderbook`, no connect form). Precedence inside the
+SPA: an existing tab session wins, the dev-autologin query (test flows)
+beats the endpoint, a failed/missing pair falls back to the connect
+form. "forget this daemon" disconnects for the tab only — the next
+reload auto-connects again. Trust note: `/elek-web-config.json` hands
+the rpc password to every browser that reaches elek-web; keep the bind
+loopback-only / tunnelled and do NOT open port 3000 in nftables.
+
 Two MM2.json keys are required in every daemon the UI connects to:
 
 - `"rpccors": "http://localhost:3000"` — the daemon answers every RPC

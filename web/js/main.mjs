@@ -3,7 +3,8 @@
 // the store bus (connected / disconnected / toast / daemon-state / sse-state).
 // A view's render() may return a cleanup fn — called before the next render.
 
-import { loadSession, clearSession, on, emit } from './store.mjs';
+import { loadSession, saveSession, clearSession, newClientId, on, emit } from './store.mjs';
+import { probe } from './api.mjs';
 import * as connectView from './views/connect.mjs';
 import * as orderbookView from './views/orderbook.mjs';
 import * as tradeView from './views/trade.mjs';
@@ -120,4 +121,39 @@ btnDisconnect.addEventListener('click', () => {
 });
 
 window.addEventListener('hashchange', route);
-route();
+
+// Auto-connect: when elek-web runs with MM_WEB_RPC_URL + MM_WEB_RPC_PASS, it
+// serves /elek-web-config.json and the SPA connects at boot without the
+// connect form. Precedence: an existing session in this tab wins, then the
+// dev autologin query (test flows only), then this endpoint; whenever
+// anything is missing or fails, the connect form (no session -> the router
+// gates every other view) is still the fallback.
+async function tryAutoConnect() {
+  if (loadSession()) return;
+  const query = new URLSearchParams(location.hash.split('?').slice(1).join('?'));
+  if (query.get('dev-url')) return;
+  let cfg;
+  try {
+    const resp = await fetch('/elek-web-config.json');
+    if (!resp.ok) return;                      // endpoint off -> manual flow
+    cfg = await resp.json();
+  } catch {
+    return;
+  }
+  if (!cfg || typeof cfg !== 'object') return;
+  const base = typeof cfg.rpc_url === 'string' ? cfg.rpc_url.replace(/\/+$/, '') : '';
+  const pass = typeof cfg.rpc_pass === 'string' ? cfg.rpc_pass : '';
+  if (!base || !pass) return;
+  try {
+    const { version, coins } = await probe(base, pass);
+    saveSession({ url: base, userpass: pass, clientId: newClientId(), version, coins: coins.length });
+    // keep deep links (e.g. #/wallet); only redirect connect/empty hashes
+    if (!location.hash || location.hash === '#/connect') location.hash = '#/orderbook';
+    emit('toast', { msg: 'connected: kdf ' + version + ', ' + coins.length + ' coin(s) active' });
+  } catch (e) {
+    emit('toast', { msg: 'auto-connect failed: ' + (e.message || e), kind: 'err', ms: 6000 });
+    // fall through: route() below shows the connect form (no session saved)
+  }
+}
+
+tryAutoConnect().finally(route);
