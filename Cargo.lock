@@ -2040,6 +2040,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "elek-web"
+version = "0.1.0"
+dependencies = [
+ "hyper 0.14.26",
+ "tokio",
+]
+
+[[package]]
 name = "elliptic-curve"
 version = "0.13.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

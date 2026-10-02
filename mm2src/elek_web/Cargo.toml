@@ -1,0 +1,10 @@
+[package]
+name = "elek-web"
+version = "0.1.0"
+edition = "2021"
+authors = ["Rozhkov Dmitrii <rozhkov@komodoplatform.com>", "elektron-net fork"]
+description = "Static file server for the elektron-net market web UI (serves web/ on loopback; the SPA talks to the local kdf daemon directly)"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+hyper = { workspace = true, features = ["http1", "server", "tcp"] }
+tokio = { workspace = true, features = ["fs", "macros", "net", "rt-multi-thread"] }

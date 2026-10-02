@@ -1,0 +1,59 @@
+/* elek market — design tokens ("calm terminal").
+   Every component references these; no raw values in app.css beyond the
+   token layer. Tokens exist BEFORE components (FrontendCraftMind order). */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg: #0b0e14;
+  --panel: #11151d;
+  --panel-2: #161b26;      /* inset / hover */
+  --line: #232937;         /* hairlines */
+
+  /* text */
+  --text: #e6e9f0;
+  --muted: #8b93a7;
+
+  /* market palette: ONE accent, semantic red/green kept desaturated */
+  --accent: #34d1a3;
+  --accent-soft: rgba(52, 209, 163, 0.14);
+  --up: #34d1a3;           /* bids */
+  --down: #e05656;         /* asks */
+  --warn: #d9a13a;
+  --err: #e05656;
+
+  /* movement: only ever a short flash on live update */
+  --flash-up: rgba(52, 209, 163, 0.18);
+  --flash-down: rgba(224, 86, 86, 0.18);
+
+  /* type */
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --fs-1: 12px;
+  --fs-2: 13px;
+  --fs-3: 15px;
+  --fs-4: 18px;
+  --fs-5: 22px;
+
+  /* space & shape */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --radius: 8px;
+
+  /* motion */
+  --dur-1: 120ms;   /* hover/focus/flash */
+  --dur-2: 300ms;   /* view swap */
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* respect users who skip motion (falsification state: motion off) */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+  }
+}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>elek market</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/orderbook">elek<span class="brand-dot">·</span>market</a>
+    <nav id="nav" class="nav hidden" aria-label="views">
+      <a href="#/orderbook" data-nav="orderbook">orderbook</a>
+      <a href="#/trade" data-nav="trade">trade</a>
+      <a href="#/wallet" data-nav="wallet">wallet</a>
+      <a href="#/swaps" data-nav="swaps">swaps</a>
+      <a href="#/coins" data-nav="coins">coins</a>
+    </nav>
+    <div class="conn">
+      <span id="ver" class="ver num muted"></span>
+      <span id="led" class="led off" title="daemon connection"></span>
+      <button id="btn-connect" class="btn ghost small hidden" type="button">connect</button>
+      <button id="btn-disconnect" class="btn ghost small hidden" type="button">disconnect</button>
+    </div>
+  </header>
+  <main id="view" class="view-root">
+    <noscript><section class="panel state"><h2>JavaScript required</h2><p class="muted">The market UI is a static single-page app; enable JavaScript.</p></section></noscript>
+  </main>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="/js/main.mjs"></script>
+</body>
+</html>

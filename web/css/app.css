@@ -1,0 +1,261 @@
+/* elek market — component layer. References ONLY tokens (no raw colors/
+   sizes beyond the token layer in tokens.css). */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-2);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code { font-family: var(--font-num); font-size: var(--fs-1); }
+
+::selection { background: var(--accent-soft); }
+
+.muted { color: var(--muted); }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.right { text-align: right; }
+.grow { flex: 1; }
+.hidden { display: none !important; }
+
+/* ---- topbar ---- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: 0 var(--sp-5);
+  height: 52px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.brand {
+  font-size: var(--fs-4);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.brand:hover { text-decoration: none; }
+.brand-dot { color: var(--accent); }
+.conn { display: flex; align-items: center; gap: var(--sp-3); margin-left: auto; }
+.ver { font-size: var(--fs-1); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.led {
+  width: 9px; height: 9px; border-radius: 50%;
+  display: inline-block;
+  background: var(--muted);
+  transition: background var(--dur-1) var(--ease);
+}
+.led.ok { background: var(--accent); box-shadow: 0 0 6px var(--accent-soft); }
+.led.down { background: var(--down); box-shadow: 0 0 6px var(--flash-down); }
+
+.nav { display: flex; gap: var(--sp-1); }
+.nav a {
+  color: var(--muted);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.nav a:hover { color: var(--text); background: var(--panel-2); }
+.nav a.active { color: var(--text); background: var(--panel-2); }
+
+/* ---- layout ---- */
+.view-root { padding: var(--sp-5); }
+.page {
+  max-width: 1150px;
+  margin: 0 auto;
+  display: grid;
+  gap: var(--sp-5);
+}
+.page-cols {
+  max-width: 1150px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 5fr 7fr;
+  gap: var(--sp-5);
+  align-items: start;
+}
+@media (max-width: 900px) { .page-cols { grid-template-columns: 1fr; } }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: var(--fs-3);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.panel-head .side { margin-left: auto; font-size: var(--fs-1); }
+
+/* ---- buttons & forms ---- */
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-2);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.btn:hover { background: #1a2130; }  /* panel-2 + hover lift, token-relative */
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08110d;
+  font-weight: 600;
+}
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; }
+.btn.ghost:hover { background: var(--panel-2); }
+.btn.small { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-1); }
+.btn.danger:hover { border-color: var(--down); color: var(--down); }
+
+.field { display: block; margin-bottom: var(--sp-3); }
+.field > span {
+  display: block;
+  font-size: var(--fs-1);
+  color: var(--muted);
+  margin-bottom: var(--sp-1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+input, select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-num);
+  font-size: var(--fs-2);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  transition: border-color var(--dur-1) var(--ease);
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.form-err { color: var(--err); font-size: var(--fs-1); margin: var(--sp-2) 0 0; }
+.form-ok { color: var(--up); font-size: var(--fs-1); margin: var(--sp-2) 0 0; }
+
+/* ---- tables ---- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-2);
+}
+.table th {
+  text-align: left;
+  font-size: var(--fs-1);
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--sp-2) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+.table td {
+  padding: var(--sp-2) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.table tbody tr:hover { background: var(--panel-2); }
+.table .right { text-align: right; }
+tr.mine td { background: var(--accent-soft); }
+
+/* depth bar: fill rendered as absolutely-positioned inner element */
+.bars { position: relative; }
+.bar-fill {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  max-width: 100%;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.bar-fill.bid { background: color-mix(in srgb, var(--up) 16%, transparent); }
+.bar-fill.ask { background: color-mix(in srgb, var(--down) 16%, transparent); }
+
+@keyframes flash {
+  from { background: var(--flash-up); }
+  to   { background: transparent; }
+}
+@keyframes flash-down {
+  from { background: var(--flash-down); }
+  to   { background: transparent; }
+}
+td.flash { animation: flash var(--dur-2) var(--ease); }
+td.flash-down { animation: flash-down var(--dur-2) var(--ease); }
+
+/* ---- state blocks (empty / error / offline ARE product, not aftermath) ---- */
+.state {
+  text-align: center;
+  padding: var(--sp-6) var(--sp-4);
+  color: var(--muted);
+}
+.state h2 { color: var(--text); font-size: var(--fs-3); margin: 0 0 var(--sp-2); }
+.state p { margin: var(--sp-1) 0; font-size: var(--fs-2); }
+.state code { color: var(--text); }
+.state .btn { margin-top: var(--sp-4); }
+
+/* connect panel */
+.connect { max-width: 520px; margin: var(--sp-6) auto 0; }
+.connect h1 { font-size: var(--fs-4); margin: 0 0 var(--sp-2); }
+.connect .btn { width: auto; }
+.connect-actions { margin-top: var(--sp-4); }
+
+/* toasts */
+.toasts {
+  position: fixed;
+  bottom: var(--sp-4);
+  right: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  z-index: 10;
+}
+.toast {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-1);
+  max-width: 380px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: toast-in var(--dur-2) var(--ease);
+}
+.toast.err { border-left-color: var(--err); }
+.toast.warn { border-left-color: var(--warn); }
+@keyframes toast-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+/* stub phase placeholder (replaced phase by phase) */
+.stub {
+  max-width: 1150px;
+  margin: var(--sp-6) auto 0;
+}
