@@ -552,6 +552,49 @@ Caveats verified live:
   book top level (no `result` wrapper). `cancel_order` needs the
   `uuid` at top level.
 
+### 10. Deployment layer (systemd user units, netid-2 market) (2026-10-02)
+
+`deploy/`: run the fork as long-lived services without Docker.
+
+- `kdf@.service`: templated systemd **user** unit (instance name `%i`).
+  Pitfall verified live the hard way (journal, status 203/EXEC,
+  "Unable to locate executable '${KDF_BIN}'"): systemd does **not**
+  expand `${VAR}` from EnvironmentFile in the ExecStart executable path
+  — use a specifier-resolved fixed path (`ExecStart=%h/.local/bin/kdf`)
+  and install the release binary there (`install -m0755`). Environment
+  variables from the EnvironmentFile (RUST_LOG, MM_LOG, MM_COINS_PATH,
+  MM_CONF_PATH) reach the process normally.
+- `kdf.env.example` + `MM2.json.{seed,trade}.example`: one env file at
+  `~/.config/kdf/<instance>.env` and one MM2.json per instance. MM2.json
+  holds seed phrase + rpc password: machine-local, `0600`, never
+  committed and never printed.
+- Port plan (netid 2, formula in `lp_network.rs`): seed RPC 7795, trade
+  RPC 7796 (loopback only, `rpcip 127.0.0.1`), seed P2P 7805 — the only
+  externally reachable port. Trade nodes dial the seed (client-only).
+- `nftables-kdf.nft`: inet table `elektron_kdf`, input chain at
+  priority filter+10 dropping tcp/7805 from every source outside
+  LAN `192.168.178.0/24` and Tailnet `100.64.0.0/10` (loopback exempt).
+  Applied live: `nft list table inet elektron_kdf` shows both rules.
+  A functional drop test needs a non-LAN source, which this host cannot
+  produce — rule presence is the verification level reached.
+- Coins restore from the instance database after restart, but verify
+  with `get_enabled_coins` and re-activate missing ones. Verified live:
+  the mmrpc-2.0 `electrum` method **does not exist** on this build
+  (dispatcher "No such method"), and the mmrpc-2.0 envelope rejects a
+  top-level `coin` field — activation is the legacy envelope
+  `{"method": "electrum", "coin": <ticker>, "servers": [{"url": ...,
+  "protocol": "TCP"}], "required_confirmations": N}` top-level, exactly
+  as `scripts/elektron/testnet_rpc.py` does it on regtest/testnet. The
+  first call may return an empty 500 body; retry and confirm via
+  `get_enabled_coins`.
+- Live state after deployment (netid 2): `kdf@seed` + `kdf@trade1`
+  active (running) under systemd, Linger=yes; both RPCs answer
+  `3.0.0-beta_f600dd5`; seed binds 0.0.0.0:7805 + loopback 7795, trade1
+  binds loopback 7796 and dials the seed; ELEK activated on both
+  instances with mainnet-hrp `be1...` addresses against the
+  machine-local electrs (192.168.178.21:50002); the elek-swap CLI
+  config points at the trade1 RPC.
+
 ## Upstream sync policy
 
 - Manual security ports from upstream `main`; tag
