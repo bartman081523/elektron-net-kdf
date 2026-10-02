@@ -259,3 +259,58 @@ td.flash-down { animation: flash-down var(--dur-2) var(--ease); }
   max-width: 1150px;
   margin: var(--sp-6) auto 0;
 }
+
+/* ---- generic additions (F1) ---- */
+.row { display: flex; gap: var(--sp-2); align-items: center; }
+.row > input { flex: 1; width: auto; min-width: 0; }
+.strong { font-weight: 600; }
+.mono { font-family: var(--font-num); }
+.err-text { color: var(--err); font-size: var(--fs-1); margin: var(--sp-2) 0 0; }
+.state.error { color: var(--err); }
+.state.wait { color: var(--warn); }
+
+.tag {
+  font-family: var(--font-num);
+  font-size: var(--fs-1);
+  padding: 1px var(--sp-2);
+  border-radius: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+tr.row-error td:first-child { color: var(--err); }
+
+/* ---- selftest rows ---- */
+.st-row {
+  border-bottom: 1px solid var(--line);
+}
+.st-row summary {
+  cursor: pointer;
+  padding: var(--sp-2) 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-2);
+}
+.st-row summary::-webkit-details-marker { display: none; }
+.st-row summary::before { content: '▸'; color: var(--muted); font-size: var(--fs-1); }
+.st-row[open] summary::before { content: '▾'; }
+.st-raw {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  font-family: var(--font-num);
+  font-size: var(--fs-1);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  margin: 0 0 var(--sp-3);
+}
+.st-pass .st-tag { color: var(--up); }
+.st-fail .st-tag { color: var(--err); }
+.st-warn .st-tag { color: var(--warn); }
+.st-info .st-tag { color: var(--muted); }
+.pass-line { color: var(--up); }

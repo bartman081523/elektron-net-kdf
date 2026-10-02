@@ -8,6 +8,9 @@ Stdlib only. Canned responses mirror the envelopes verified live in phases
   legacy {"error": "<string>"} form)
 - v2: {"mmrpc": "2.0", "method", "params"} -> {"mmrpc": "2.0", "result": ...}
   or {"mmrpc": "2.0", "error": {error_path, error_type, error_trace, error_data}}
+- success wrap is MIXED on real daemons (pinned live in F1, regtest
+  3.0.0-beta): my_balance and orderbook answer BARE, version /
+  get_enabled_coins / my_orders wrap in "result"
 - GET /event-stream?id=<n> -> SSE, data: {"_type": "ORDERBOOK_UPDATE:orbk:ELEK:tBTC",
   "message": {order_type, order_data}} with a scripted update loop.
 
@@ -183,20 +186,22 @@ def _canned(req):
         })
 
     if method == 'my_balance':
+        # BARE on the real daemon (no "result" wrapper) — do not wrap
         coin = params.get('coin') or req.get('coin')
         if coin == 'ELEK':
-            return _respond(req, {'coin': 'ELEK', 'balance': '231.4567',
-                                  'unspendable_balance': '0', 'address': MY_ADDRESS})
-        return _respond(req, {'coin': coin, 'balance': '0.5', 'unspendable_balance': '0',
-                              'address': coins[1]['address']})
+            return {'coin': 'ELEK', 'balance': '231.4567',
+                    'unspendable_balance': '0', 'address': MY_ADDRESS}
+        return {'coin': coin, 'balance': '0.5', 'unspendable_balance': '0',
+                'address': coins[1]['address']}
 
     if method == 'orderbook':
+        # BARE on the real daemon (no "result" wrapper) — do not wrap
         asks, bids = _sorted_book()
-        return _respond(req, {
+        return {
             'base': BOOK_PAIR[0], 'rel': BOOK_PAIR[1],
             'num_asks': len(asks), 'num_bids': len(bids),
             'asks': asks, 'bids': bids,
-        })
+        }
 
     if method in ('sell', 'buy'):
         if _is_v2(req):

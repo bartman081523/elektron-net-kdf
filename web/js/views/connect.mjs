@@ -1,37 +1,18 @@
 // Connect view: URL + rpc password -> probes the daemon (`version`, public
 // method; then `get_enabled_coins` with the password) -> sessionStorage.
 // Until a session exists every other view is gated off (router in main.mjs).
+//
+// Dev autologin: #/connect?dev-url=…&dev-pass=…&next=<view> connects without
+// interaction — honored ONLY for localhost origins, so headless verification
+// and local test loops can script the SPA. Test credentials only; never put
+// a real password in a URL.
 
 import { loadSession, saveSession, clearSession, newClientId, emit } from '../store.mjs';
+import { probe } from '../api.mjs';
 import { esc } from '../format.mjs';
 
-// Legacy JSON-RPC over POST. The daemon accepts the legacy top-level envelope
-// ({"method": ..., "userpass": ...}); the v2 params envelope arrives with the
-// api layer (F1). Errors: legacy failures come back as {"error": "<string>"},
-// HTTP-failures (e.g. the daemon's empty 500) as an unparseable body.
-async function rpc(base, body) {
-  const resp = await fetch(base + '/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  let json = null;
-  try {
-    json = await resp.json();
-  } catch {
-    throw new Error('no JSON body (HTTP ' + resp.status + ') — is this a kdf RPC port?');
-  }
-  if (json && json.error) {
-    throw new Error(typeof json.error === 'string' ? json.error : JSON.stringify(json.error));
-  }
-  return json;
-}
-
-function versionStr(resp) {
-  const res = resp && resp.result;
-  if (typeof res === 'string') return res;
-  if (res && typeof res === 'object') return res.rpc_version || res.version || 'unknown';
-  return 'unknown';
+function hashQuery() {
+  return new URLSearchParams(location.hash.split('?').slice(1).join('?'));
 }
 
 export function render(root) {
@@ -40,6 +21,21 @@ export function render(root) {
     renderConnected(root, session);
     return;
   }
+
+  const q = hashQuery();
+  const devUrl = q.get('dev-url');
+  const isLocalhost = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
+  if (devUrl && isLocalhost) {
+    root.innerHTML = `
+      <section class="panel connect">
+        <h1>connect to daemon</h1>
+        <p id="c-err" class="form-err">dev autologin → ${esc(devUrl.replace(/\/+$/, ''))}…</p>
+      </section>`;
+    // fall through without user interaction; password stays in the tab only
+    connectTo(devUrl.replace(/\/+$/, ''), q.get('dev-pass') || 'mock', q.get('next') || 'orderbook', root);
+    return;
+  }
+
   root.innerHTML = `
   <section class="panel connect">
     <h1>connect to daemon</h1>
@@ -68,29 +64,35 @@ export function render(root) {
 
   root.querySelector('#connect-form').addEventListener('submit', (ev) => {
     ev.preventDefault();
-    const go = root.querySelector('#c-go');
     const err = root.querySelector('#c-err');
     const base = root.querySelector('#c-url').value.trim().replace(/\/+$/, '');
     const userpass = root.querySelector('#c-pass').value;
-    go.disabled = true;
     err.textContent = 'connecting…';
-    (async () => {
-      // 1) URL probe: `version` is a public method (no password involved).
-      const ver = await rpc(base, { method: 'version' });
-      const version = versionStr(ver);
-      // 2) password probe: legacy envelope carries userpass at top level.
-      const coins = await rpc(base, { userpass, method: 'get_enabled_coins' });
-      const list = Array.isArray(coins.result) ? coins.result : [];
-      if (coins.error) throw new Error(String(coins.error));
-      saveSession({ url: base, userpass, clientId: newClientId(), version, coins: list.length });
-      emit('toast', { msg: 'connected: kdf ' + version + ', ' + list.length + ' coin(s) active' });
-      emit('connected');
-    })().catch((e) => {
-      err.textContent = 'connection failed: ' + e.message;
-    }).finally(() => {
-      go.disabled = false;
-    });
+    connectTo(base, userpass, 'orderbook', root, err);
   });
+}
+
+async function connectTo(base, userpass, nextView, root, errEl) {
+  const setErr = (msg) => {
+    if (errEl) errEl.textContent = 'connection failed: ' + msg;
+    else {
+      const el = root.querySelector('#c-err');
+      if (el) el.textContent = 'connection failed: ' + msg;
+    }
+  };
+  try {
+    const { version, coins } = await probe(base, userpass);
+    saveSession({ url: base, userpass, clientId: newClientId(), version, coins: coins.length });
+    // Set the target hash BEFORE emit('connected'): main.mjs only redirects
+    // to #/orderbook when the hash is still the connect view — otherwise it
+    // would clobber a dev-autologin `next` (and the view would render twice).
+    const suffix = nextView === 'selftest' ? '?auto=1' : '';
+    location.hash = '#/' + nextView + suffix;
+    emit('toast', { msg: 'connected: kdf ' + version + ', ' + coins.length + ' coin(s) active' });
+    emit('connected');
+  } catch (e) {
+    setErr(e.message);
+  }
 }
 
 function renderConnected(root, session) {
