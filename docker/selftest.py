@@ -15,9 +15,10 @@ Envelope facts this script relies on (verified in the local T2 campaign):
   my_orders legacy returns {maker_orders:{},taker_orders:{}} (object form)
   activating an already-activated electrum coin errors with a message
             containing "already" (idempotency probe)
-  the electrum activation request key is `servers` — the coins file spells
-            the same values "url"; sending "urls" deserializes to null
-            ("invalid type: null, expected a sequence", utxo.rs)
+  the electrum activation request key is `servers` and every entry is an
+            object {"url": host:port} — the coins file spells the same
+            values "url"; plain strings or a "urls" key deserialize to
+            errors (utxo.rs ElectrumConnectionSettings)
 """
 
 import http.client
@@ -80,13 +81,14 @@ def sse_probe(port):
 def activate(port, coin, servers):
     """electrum activation; an 'already' error means activated and passes.
 
-    The request key is `servers` (as in web/js/api.mjs electrum()); the coins
-    file calls the same strings "url" — different key, same values.
+    Mirror of web/js/api.mjs electrum() + coins.mjs activation: the request
+    key is `servers` and every entry is an object {"url": host:port} — plain
+    strings fail "expected struct ElectrumConnectionSettings" (utxo.rs).
     """
     for attempt in range(3):
         try:
             rpc(port, "electrum", fields={
-                "coin": coin, "servers": servers,
+                "coin": coin, "servers": [{"url": s} for s in servers],
                 "required_confirmations": 2, "mature_confirmations": 1})
             return f"activated on attempt {attempt + 1}"
         except RpcError as e:
@@ -219,7 +221,7 @@ def main():
 
     try:
         rpc(TRADER_PORT, "electrum", fields={
-            "coin": btc, "servers": urls(btc),
+            "coin": btc, "servers": [{"url": s} for s in urls(btc)],
             "required_confirmations": 2, "mature_confirmations": 1})
         record("re-activate tBTC idempotency (expect err)", "hard", False,
                "unexpected success — already-activated coin must err")
