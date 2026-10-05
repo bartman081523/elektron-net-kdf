@@ -15,6 +15,9 @@ Envelope facts this script relies on (verified in the local T2 campaign):
   my_orders legacy returns {maker_orders:{},taker_orders:{}} (object form)
   activating an already-activated electrum coin errors with a message
             containing "already" (idempotency probe)
+  the electrum activation request key is `servers` — the coins file spells
+            the same values "url"; sending "urls" deserializes to null
+            ("invalid type: null, expected a sequence", utxo.rs)
 """
 
 import http.client
@@ -74,11 +77,17 @@ def sse_probe(port):
     return ok
 
 
-def activate(port, coin, urls):
-    """electrum activation; an 'already' error means activated and passes."""
+def activate(port, coin, servers):
+    """electrum activation; an 'already' error means activated and passes.
+
+    The request key is `servers` (as in web/js/api.mjs electrum()); the coins
+    file calls the same strings "url" — different key, same values.
+    """
     for attempt in range(3):
         try:
-            rpc(port, "electrum", fields={"coin": coin, "urls": urls})
+            rpc(port, "electrum", fields={
+                "coin": coin, "servers": servers,
+                "required_confirmations": 2, "mature_confirmations": 1})
             return f"activated on attempt {attempt + 1}"
         except RpcError as e:
             if "already" in str(e.payload).lower():
@@ -143,6 +152,7 @@ def main():
     btc = "tBTC"
     telek = "tELEK" if TELEK else None
     urls = lambda c: [s["url"] for s in by_ticker[c]["electrum"]]  # noqa: E731
+    # (URL strings from the coins file ride the `servers` request key, never "urls")
 
     print(f"selftest: market :{MARKET_PORT} | trader :{TRADER_PORT} | coins {list(by_ticker)}")
 
@@ -190,9 +200,14 @@ def main():
 
     ob_pair = (btc, telek) if telek else None
     if ob_pair:
-        ob = rpc(TRADER_PORT, "orderbook", fields={"base": ob_pair[0], "rel": ob_pair[1]})
-        ok = isinstance(ob, dict) and isinstance(ob.get("asks"), list) and isinstance(ob.get("bids"), list)
-        record("trader orderbook tBTC/tELEK structure", "hard", ok)
+        try:
+            ob = rpc(TRADER_PORT, "orderbook", fields={"base": ob_pair[0], "rel": ob_pair[1]})
+            ok = isinstance(ob, dict) and isinstance(ob.get("asks"), list) \
+                and isinstance(ob.get("bids"), list)
+            record("trader orderbook tBTC/tELEK structure", "hard", ok)
+        except RpcError as e:
+            record("trader orderbook tBTC/tELEK structure", "hard",
+                   False, str(e.payload)[:200])
     else:
         skip("trader orderbook structure", "single-coin mode (set MM_TELEK_ELECTRS for a real pair)")
 
@@ -203,7 +218,9 @@ def main():
     record("trader cancel_all_orders (write path)", "hard", ca is not None, str(ca)[:120])
 
     try:
-        rpc(TRADER_PORT, "electrum", fields={"coin": btc, "urls": urls(btc)})
+        rpc(TRADER_PORT, "electrum", fields={
+            "coin": btc, "servers": urls(btc),
+            "required_confirmations": 2, "mature_confirmations": 1})
         record("re-activate tBTC idempotency (expect err)", "hard", False,
                "unexpected success — already-activated coin must err")
     except RpcError as e:
@@ -231,9 +248,13 @@ def main():
     except RpcError as e:
         record("my_swap_status bogus -> err", "hard", True, str(e.payload)[:160])
 
-    act = rpc(TRADER_PORT, "active_swaps")
-    rec = rpc(TRADER_PORT, "recent_swaps")
-    record("trader active_swaps + recent_swaps", "hard", act is not None and rec is not None)
+    try:
+        act = rpc(TRADER_PORT, "active_swaps")
+        rec = rpc(TRADER_PORT, "my_recent_swaps")  # legacy name; "recent_swaps" does not exist
+        record("trader active_swaps + my_recent_swaps", "hard",
+               act is not None and rec is not None)
+    except RpcError as e:
+        record("trader active_swaps + my_recent_swaps", "hard", False, str(e.payload)[:200])
 
     record("trader SSE /event-stream reachable", "hard", sse_probe(TRADER_PORT),
            "GET /event-stream -> 200 text/event-stream")
@@ -255,7 +276,8 @@ def main():
                 volume = str(max(Number((bal_m.get(base_c) or {}).get("balance")) * 0.02, 0))
                 order = rpc(MARKET_PORT, "setprice", fields={
                     "base": base_c, "rel": rel_c, "price": price,
-                    "volume": volume, "min_volume": str(Number(volume) / 10 or volume)})
+                    "volume": volume, "min_volume": str(Number(volume) / 10 or volume),
+                    "order_type": {"type": "GoodTillCancelled"}})
                 uuid = order.get("uuid")
                 record("maker setprice " + "-".join((base_c, rel_c)), "fund-gated",
                        isinstance(uuid, str) and len(uuid) > 10)
