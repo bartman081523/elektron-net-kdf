@@ -79,6 +79,12 @@ export function render(root) {
         '<div class="state empty">a book needs two enabled coins — activate more under <a href="#/coins">coins</a>.</div>';
       return;
     }
+    // the selects ship empty in the template — fill them like trade.mjs does,
+    // or refs.base.value = ... silently no-ops and the pair falls back to
+    // coins[0]/coins[1] (daemon order), which can be a different pair entirely
+    const opts = coins.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    refs.base.innerHTML = opts;
+    refs.rel.innerHTML = opts;
     const wanted = loadPair();
     pair = coins.includes(wanted.base) && coins.includes(wanted.rel) && wanted.base !== wanted.rel
       ? wanted
