@@ -731,6 +731,128 @@ browser (http://localhost:3000, hash router)
   patched with the two keys and the daemons restarted (see
   deploy/README.md "Web UI").
 
+### 12. UI test campaign: two real users end-to-end (2026-10-05)
+
+Same-origin proxy variant of the section-11 architecture: elek-web doubles
+as a one-daemon reverse proxy (`MM_WEB_PROXY_URL` + `MM_WEB_RPC_PASS`) —
+`POST /rpc` forwards to the kdf RPC with `userpass` injected server-side,
+`GET /rpc/event-stream` passes the SSE through with the query intact,
+`/healthz` reports liveness, and `/elek-web-config.json` hands over
+`{"rpc_url":"/rpc","rpc_pass":"","rpc_proxy":true}` so the SPA connects
+without ever holding the daemon password (`web/js/main.mjs:148-158`
+saves the proxy session). The direct-CORS mode of section 11 coexists.
+
+Setup and truth source (A-grade, everything executed live):
+
+- two regtest kdf instances as two independent users — alice RPC :7793,
+  bob RPC :7794 — behind two elek-web proxy instances (:3010 → alice,
+  :3011 → bob). A headless-chromium CDP harness drove the real SPA per
+  user (fresh browser profile per run); balances are asserted as
+  `my_balance` deltas around each step, order/swap truth is `my_orders`,
+  `orderbook`, `my_recent_swaps`, `my_swap_status` read in-page through
+  the same proxy path the views use. Harness files are /tmp-only.
+- results by phase: T1 instance/port discovery; T2 the full section-11
+  envelope contract exercised in-page from both users; T3 deposits with
+  exact-delta asserts (rELEK/rBTC); T4 the two-step withdraw with fee
+  preimage, error forms, Max and Discard, plus real broadcasts (rBTC
+  0.05, tELEK 1.0, rELEK 0.5) and a peer-side receipt verified.
+- T5 trades, both directions fully in the UI, fresh campaign with its
+  own order set (ledger in the harness state file):
+  - **leg 1, maker alice / taker bob**: rest-mode setprice rELEK/rBTC
+    ask 0.001 vol 10 min 0.1 → order `7a236605…`; visible on bob's
+    orderbook via the P2P loopback within ~3 s and stable across polls.
+    Bob buys via immediate/buy → taker swap `fed72d08…` (TakerV1, 13
+    events, ends Finished) and consumes the maker order.
+    Balance deltas: alice −10.00000309 rELEK / +0.00999504 rBTC; bob
+    +9.99999504 rELEK / −0.01000173 rBTC (the offset from nominal ±10 /
+    ∓0.01 is the pair's fee legs).
+  - **cancel path**: a throwaway order placed BEFORE the resting one,
+    then cancelled via its row in my_orders — success toast
+    `cancelled <uuid-cut>`, row gone from my_orders and from the
+    orderbook refresh (an order can be replaced, see below; the
+    resting order is always placed last on the pair).
+  - **replace semantics pinned live**: setprice's `cancel_previous`
+    defaults to TRUE (`lp_ordermatch.rs` SetPriceReq, defaults
+    struct; handling at the two setprice call sites) and the SPA does
+    not send it — so a second rest on the same pair SILENTLY replaces
+    the first. Asserted in the campaign: bob's first ask
+    0.0025@1 (`throwaway`) was replaced by 0.0015@4 min 0.5 → first
+    order gone from my_orders, distinct uuid, book shows the new one.
+  - **leg 2, maker bob / taker alice**: rest 0.0015@4 vol 4 min 0.5 →
+    `2ead0c0a…`; alice's orderbook renders the peer ask (P2P visibility
+    proven in both directions); alice buys → taker swap `0d71e524…`
+    Finished; deltas alice +~4 rELEK / −0.006 rBTC, bob mirrors.
+  - end state: `my_orders` maker/taker empty on BOTH daemons, books
+    empty, both swaps Finished and rendered done in each side's swaps
+    history.
+- **UI defects the campaign found and fixed** (served from the same
+  checkout, both fixes live-proven inside the campaign flows):
+  1. `web/js/views/orderbook.mjs` shipped its two pair `<select>`s
+     empty and render() only ASSIGNED `refs.base.value` — a silent
+     no-op without `<option>` children. The pair fell back to
+     `coins[0]/coins[1]` in `get_enabled_coins` daemon order (bob:
+     `[rBTC, tELEK, rELEK]` → the default book rendered rBTC/tELEK,
+     a pair nobody ever traded, hence "empty book"). Fix mirrors the
+     trade view: populate both selects from the coin list. The P2P
+     path itself was never at fault — the daemon propagated the peer
+     ask within seconds.
+  2. `web/js/views/swaps.mjs` `metaOf` now reads BOTH
+     `my_recent_swaps` serializations: the v2 tagged item
+     `{swap_type, swap_data}` (pinned for the UI paging envelope
+     `{filter: {}, paging: {…}}`) and the flat legacy item
+     (uuid/is_finished/error_events/events at top level, reached e.g.
+     by a top-level `{"limit": 2}` call). Which shape arrives is
+     envelope-dependent (pinned live against the daemon), so the view
+     accepts both and derives `is_finished` from either the explicit
+     boolean or the terminal event name.
+
+- **T6 testnet campaign** (same proxy UI, pair tELEK × rBTC — private
+  ELEK testnet via the local testnet electrs `:50005`, BTC regtest via
+  the local regtest electrs `:50004`), fresh order ledger:
+  - **leg 1, maker bob / taker alice**: a throwaway ask 0.002@1 min 0.1
+    placed first and silently replaced (replace semantics re-proven on
+    this pair), resting ask tELEK 5 @0.001 min 0.5; alice bought
+    immediate/buy → swap Finished on both sides. Balance deltas anchor
+    on placement-boot `my_balance` reads carried in the harness state
+    file (no hardcoded balances), within fee tolerance.
+  - **leg 2, maker alice / taker bob**: cancel-path throwaway first
+    (cancelled via its my_orders row, order then absent from
+    `my_orders` and the book), resting ask tELEK 4 @0.0015 min 0.4; bob
+    bought immediate/buy → swap Finished; mirrored deltas.
+  - all eight trade flows green (bob-make / alice-take / alice-done /
+    bob-watch2 / alice-make / bob-take / bob-watch / alice-watch);
+    SSE `ORDERBOOK_UPDATE` and peer-side order visibility exercised in
+    both directions again.
+- **coins view: custom add form + disable, end-to-end** (TESTBTC — the
+  only UI path for a registry coin with no preset row; servers entered
+  as `testnet.aranguren.org:51001`):
+  - one green run proves the full cycle: add form → coin listed in
+    `get_enabled_coins` (observed in-page through the same proxy path)
+    → row disable → coin gone → cold re-add → coin back → wallet row
+    rendered. `my_balance` answers for TESTBTC with address
+    `mgomJaU1dQHBpLtKNnnaaFdNZ83izL3qwB` (balance 0), matching the
+    daemon log (`disabling TESTBTC coin` at the disable step, first
+    re-activation request racing the old client's teardown with the
+    usual "no active connections" warn — harmless).
+  - the form's activation is a fire-and-poll loop (30 × 3 s, then an
+    error toast); the coin's re-activation landed well inside the
+    campaign's 420 s observer window.
+- **campaign harness defect, documented for honesty** (fixed
+  mid-campaign; the first three coins-test runs reported 6/7): the
+  harness's enabled-set observer called `api.getEnabledCoins`, which
+  does not exist — `api.mjs` exports `enabledCoins` (legacy
+  `get_enabled_coins`, the same helper both the wallet and the coins
+  views use) — so every poll threw inside a swallowing `catch` and
+  returned an empty list, faking "enabled: no" while the daemon had
+  long listed the coin. Direct-RPC probes (`get_enabled_coins`,
+  `my_balance` on the daemon RPC) disproved the false negative; the
+  fixed observer turned the same flow green in one run. No UI or
+  daemon defect — the 6/7s were harness artifacts.
+- **known UI gap, left open deliberately**: the add-form server field
+  accepts only `host:port`, so an ETH-style coin (activated over a
+  `ws://` endpoint) cannot be enabled through the UI — Sepolia stays
+  exercisable at the RPC layer only (section 8).
+
 ## Upstream sync policy
 
 - Manual security ports from upstream `main`; tag
