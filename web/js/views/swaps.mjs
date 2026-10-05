@@ -345,12 +345,14 @@ const stepOf = (evs) => {
 
 const nz = (a, b) => (a !== null && a !== undefined && a !== '' ? a : b);
 
-// Normalizes either orientation into "my" vs "other". V1 coins/amounts come
-// from the Started event data (the top-level maker/taker fields are Options
-// and often null); V2 uses its my/other + volume fields directly.
+// Normalizes either orientation into "my" vs "other". Two item shapes reach
+// this view: v2 tagged items {swap_type, swap_data} (active_swaps(true)
+// statuses, my_swap_status) and the FLAT legacy items of my_recent_swaps
+// (uuid, events, is_finished, error_events at top level). Read both: d
+// prefers swap_data and falls back to the item itself.
 function metaOf(it) {
-  const type = (it && it.swap_type) || '';
-  const d = (it && it.swap_data) || {};
+  const type = String((it && (it.swap_type || it.type)) || '');
+  const d = (it && it.swap_data) || it || {};
   const uuid = (d && d.uuid) || '';
   const isV2 = type.endsWith('V2');
   const isTaker = type.startsWith('Taker');
@@ -378,8 +380,8 @@ function metaOf(it) {
   // daemon is_finished() accepts only the terminal event; a refund-completed
   // V1 swap ends on a failure-name terminal (e.g. MakerPaymentRefundFinished)
   // and still counts as completed here, so it never vanishes between the two
-  // panels.
-  const finished = isV2
+  // panels. Flat legacy items carry is_finished outright.
+  const finished = typeof d.is_finished === 'boolean'
     ? !!d.is_finished
     : (term === 'Finished' || errorEvents.includes(term));
   const failed = evs2.some((e) => e.err);
