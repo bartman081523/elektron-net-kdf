@@ -97,3 +97,6 @@ scripts/elektron/__pycache__/
 
 # web test artifacts
 web/test/__pycache__/
+
+# container assets (bytecode from local py_compile checks)
+docker/__pycache__/
