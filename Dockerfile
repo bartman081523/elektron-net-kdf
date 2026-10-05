@@ -32,7 +32,7 @@ COPY mm2src ./mm2src
 RUN --mount=type=cache,target=/src/target \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked -p mm2_bin_lib -p elek_web \
+    cargo build --release --locked -p mm2_bin_lib -p elek-web \
     && mkdir -p /out \
     && cp target/release/kdf target/release/elek-web /out/
 
