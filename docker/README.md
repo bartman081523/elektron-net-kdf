@@ -19,9 +19,12 @@ browser ── https://<service>/            (static SPA, hash router)
 ## Build & run
 
 ```sh
-docker build -t elektron-market .
+docker build --build-arg KDF_BUILD_TAG=$(git rev-parse --short HEAD) -t elektron-market .
 docker run --rm -p 10000:10000 -e MM_TEST_SEED=some-fixed-phrase elektron-market
 ```
+
+`KDF_BUILD_TAG` stamps the daemon version string; the default fallback is
+`elektron-docker` when the argument is omitted.
 
 Open `http://localhost:10000` — the SPA auto-connects through `/rpc`
 (proxy mode, no connect form). Container logs show both daemon logs,

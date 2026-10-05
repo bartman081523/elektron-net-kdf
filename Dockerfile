@@ -21,8 +21,14 @@ ENV RUSTC_BOOTSTRAP=1 \
     CARGO_NET_GIT_FETCH_WITH_CLI=true
 WORKDIR /src
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git build-essential \
+    && apt-get install -y --no-install-recommends git build-essential protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
+# mm2_bin_lib/build.rs stamps KDF_VERSION as "<crate-version>_<tag>": with
+# KDF_BUILD_TAG set it is used directly, otherwise the script runs `git log`
+# against a repository that is NOT copied into the builder stage and panics.
+# CI passes the commit SHA; plain builds fall back to the default below.
+ARG KDF_BUILD_TAG=elektron-docker
+ENV KDF_BUILD_TAG=${KDF_BUILD_TAG}
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY mm2src ./mm2src
 # Build only the two binaries the container needs (daemon + web server).

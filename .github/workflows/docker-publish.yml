@@ -43,6 +43,8 @@ jobs:
             ghcr.io/${{ github.repository }}:testnet
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            KDF_BUILD_TAG=${{ github.sha }}
       - name: make ghcr package public (best effort)
         continue-on-error: true
         env:
