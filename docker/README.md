@@ -35,7 +35,7 @@ the selftest result table, and the funding banner.
 | `MM_NETID`         | `8888`             | DEX P2P netid of the local market/trader pair  |
 | `MM_TEST_SEED`     | random             | wallet passphrases derive from it (`<seed>-market` / `<seed>-trader`); with a fixed value the deposit addresses are IDENTICAL on every restart, otherwise the wallet starts empty and unfindable after a new boot |
 | `MM_RPC_PASS`      | generated          | daemon rpc password (container-internal only)  |
-| `MM_TELEK_ELECTRS` | unset              | electrum host:port for tELEK — when unset the coins file only contains tBTC and no pair can form; e.g. `192.168.178.21:50005` (LAN) |
+| `MM_TELEK_ELECTRS` | unset              | electrum host:port for tELEK — when unset the coins file only contains tBTC and no pair can form; supply your own LAN/remote electrs server (e.g. `<your-host>:<port>`) |
 | `MM_SKIP_SELFTEST` | unset (runs)       | `1` skips the startup selftest                 |
 | `MM_STATE_DIR`     | `/run/elek`        | runtime dir for configs/logs (ephemeral OK)    |
 
