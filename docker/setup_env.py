@@ -10,10 +10,12 @@ Secrets (rpc password, wallet passphrases) are written ONLY to these files
 (0600); stdout never receives them — only their provenance.
 """
 
+import itertools
 import json
 import os
 import secrets
 import stat
+import string
 
 STATE_DIR = os.environ.get("MM_STATE_DIR", "/run/elek")
 COINS_SRC = os.environ.get(
@@ -41,9 +43,23 @@ def rpc_pass() -> str:
     if env.strip():
         print("rpc password: from MM_RPC_PASS")
         return env.strip()
-    generated = secrets.token_hex(16)
-    print("rpc password: generated (only used container-internally)")
-    return generated
+    # kdf applies its password policy to this password at boot (it is also the
+    # wallet password): >=8 chars, digit + lower + upper + special, not more
+    # than 2 equal characters in a row, no "password" substring — see
+    # mm2src/common/password_policy.rs. Hex output fails on upper + special,
+    # so sample a mixed alphabet until everything is satisfied.
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*-_="
+    while True:
+        pw = "".join(secrets.choice(alphabet) for _ in range(20))
+        if (any(c.isdigit() for c in pw)
+                and any(c.islower() for c in pw)
+                and any(c.isupper() for c in pw)
+                and any(not c.isalnum() for c in pw)
+                and max((len(list(g)) for _, g in itertools.groupby(pw))) < 3
+                and "password" not in pw.lower()):
+            print("rpc password: generated policy-compliant "
+                  "(only used container-internally)")
+            return pw
 
 
 def wallet_passphrase(instance: str) -> str:
