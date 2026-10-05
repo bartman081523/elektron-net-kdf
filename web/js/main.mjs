@@ -143,6 +143,20 @@ async function tryAutoConnect() {
   if (!cfg || typeof cfg !== 'object') return;
   const base = typeof cfg.rpc_url === 'string' ? cfg.rpc_url.replace(/\/+$/, '') : '';
   const pass = typeof cfg.rpc_pass === 'string' ? cfg.rpc_pass : '';
+  // Proxy deployments (elek-web MM_WEB_PROXY_URL): same-origin /rpc, password
+  // injected server-side — the SPA connects without ever knowing the pass.
+  if (cfg.rpc_proxy === true) {
+    if (!base) return;
+    try {
+      const { version, coins } = await probe(base, '');
+      saveSession({ url: base, userpass: '', clientId: newClientId(), version, coins: coins.length, proxy: true });
+      if (!location.hash || location.hash === '#/connect') location.hash = '#/orderbook';
+      emit('toast', { msg: 'connected: kdf ' + version + ', ' + coins.length + ' coin(s) active (proxy mode)' });
+    } catch (e) {
+      emit('toast', { msg: 'auto-connect failed: ' + (e.message || e), kind: 'err', ms: 6000 });
+    }
+    return;
+  }
   if (!base || !pass) return;
   try {
     const { version, coins } = await probe(base, pass);

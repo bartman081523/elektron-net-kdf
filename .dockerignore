@@ -25,3 +25,26 @@ cmake-build-debug
 
 # Opt out from history in order to speed the `COPY .` up.
 /.git
+
+# --- elektron-net marketplace image (repo-root Dockerfile) -----------------
+# The image copies only Cargo files, mm2src, coins, web and docker, so keep
+# everything else out of the context (size and secret hygiene).
+/doc
+/docs
+/examples
+/scripts
+/deploy
+/scratches
+/.github
+/.vscode
+/cmake-build-debug
+/x64
+/build
+/marketmaker_depends
+/js
+__pycache__
+*.log
+*.mm2.log
+*.mm2.json
+*.tar
+*.zip

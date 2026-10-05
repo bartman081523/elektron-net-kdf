@@ -1,0 +1,33 @@
+{
+  "coin": "tELEK",
+  "name": "elektron-testnet",
+  "fname": "Elektron (testnet)",
+  "pubtype": 111,
+  "p2shtype": 196,
+  "wiftype": 239,
+  "segwit": true,
+  "bech32_hrp": "tb",
+  "address_format": {
+    "format": "segwit"
+  },
+  "decimals": 8,
+  "txfee": 1000,
+  "estimate_fee_mode": "ECONOMICAL",
+  "estimate_fee_blocks": 4,
+  "avg_blocktime": 1,
+  "required_confirmations": 2,
+  "mature_confirmations": 1,
+  "derivation_path": "m/84'/1370'",
+  "orderbook_ticker": "tELEK",
+  "rpcport": 18332,
+  "mm2": 1,
+  "protocol": {
+    "type": "UTXO"
+  },
+  "electrum": [
+    {
+      "url": "TELEK_ELECTRUM_PLACEHOLDER",
+      "protocol": "TCP"
+    }
+  ]
+}

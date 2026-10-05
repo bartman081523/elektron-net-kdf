@@ -2044,6 +2044,7 @@ name = "elek-web"
 version = "0.1.0"
 dependencies = [
  "hyper 0.14.26",
+ "serde_json",
  "tokio",
 ]
 
