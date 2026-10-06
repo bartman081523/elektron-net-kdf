@@ -918,7 +918,8 @@ Everything downstream consumes, nothing derives its own number.
 - **stays open (gates, not done here)**: mainnet `electrs.toml` carries NO
   `fx_orderbook_*` — enabling it means a kdf rpc password on mainnet disk and
   wiring electrs to a live trading daemon (`kdf@trade1`) is the operator's
-  call.
+  call. (Wired the same day, see section 15 — password via env, never on
+  a config disk.)
 - **status after the FX-HTTP + wallet leg (2026-10-06, implemented and
   verified live)**:
   - electrs gained the opt-in `fx_http_addr` HTTP endpoint (`src/fx.rs`
@@ -1061,6 +1062,31 @@ at their electrs' continuously refreshed `fx_rates_path` file.
   with the next image build (push, phase 7), followed by the usual
   verification chain (`/healthz` → config → daemon `version` → selftest
   log → SPA selftest 16/16).
+
+- **electrs wired to the live market (2026-10-06, P6, verified live)**:
+  mainnet `electrs.toml` now carries
+  `fx_orderbook_rpc_url = "http://127.0.0.1:7795"` (kdf@seed, the market
+  daemon that the local web UI also proxies) with the pair `ELEK`/`BTC`
+  (`fx_orderbook_base`/`fx_orderbook_rel`) and `fx_refresh_secs = 60`. The
+  order book rpc password travels ONLY in the systemd
+  `EnvironmentFile=%h/.local/share/kdf/seed/electrs-fx.env` (0600, key
+  `ELECTRS_FX_ORDERBOOK_USERPASS`) — no password in any toml/config disk.
+  Restart-verified: the Config banner prints `fx_orderbook_userpass:
+  <sensitive>` (redaction intact), the fx thread logs
+  `market: Some("ELEK/BTC")`, and with BTC not yet activated in the mainnet
+  kdf the kdf `orderbook` RPC answers `HTTP 200` with empty `asks`/`bids`
+  — parse_orderbook → Ok(None) → the chain falls through to the registry
+  source (rates updated … (registry), exactly the designed Normalzustand).
+  Two live improvements land with it: the snapshot now carries
+  `usd_per_btc` (85542.0 from the default `fx_btc_prices_url`
+  mempool.space) whenever the market pair's rel is BTC-family — enabling
+  cross-rate rendering in wallet/SPA even while the source is registry —
+  and the 60 s refresh bounds market-source staleness. The rate flips from
+  `registry` to `p2p_market` automatically the moment a resting ELEK/BTC
+  order exists in the mainnet netid book (already proven on the regtest
+  harness: tELEK/rBTC book rendered `p2p_market` through
+  `electrs-fx-test.toml`, which is deliberately NOT tracked — it documents
+  the wiring recipe).
 
 ## Upstream sync policy
 
