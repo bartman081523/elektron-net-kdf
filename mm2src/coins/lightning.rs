@@ -46,7 +46,10 @@ use keys::{hash::H256, CompactSignature, KeyPair, Private, Public};
 use lightning::chain::keysinterface::{KeysInterface, KeysManager, Recipient};
 use lightning::ln::channelmanager::{ChannelDetails, MIN_FINAL_CLTV_EXPIRY};
 use lightning::ln::{PaymentHash, PaymentPreimage};
-use lightning::routing::router::{DefaultRouter, PaymentParameters, RouteParameters, Router as RouterTrait};
+use lightning::routing::router::{
+    DefaultRouter, PaymentParameters, RouteParameters, Router as RouterTrait,
+    DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
+};
 use lightning::util::ser::{Readable, Writeable};
 use lightning_background_processor::BackgroundProcessor;
 use lightning_invoice::payment::Payer;
@@ -632,8 +635,13 @@ impl SwapOps for LightningCoin {
             _ => try_tx_s!(ERR!("Invalid instructions, ligntning invoice is expected")),
         };
 
-        // No need for max_total_cltv_expiry_delta for lightning maker payment since the maker is the side that reveals the secret/preimage
-        let payment = try_tx_s!(self.pay_invoice(invoice, None).await);
+        // The payer has to budget for the invoice's demanded final CLTV expiry (the
+        // whole swap locktime in blocks) on top of LDK's hop-delta allowance, else
+        // find_route preemptively refuses. The maker is the side that reveals the
+        // secret/preimage, but that doesn't lift the CLTV requirement of the HTLC.
+        let max_total_cltv_expiry_delta = (invoice.min_final_cltv_expiry() as u32)
+            + DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA;
+        let payment = try_tx_s!(self.pay_invoice(invoice, Some(max_total_cltv_expiry_delta)).await);
         Ok(payment.payment_hash.into())
     }
 
@@ -643,10 +651,11 @@ impl SwapOps for LightningCoin {
             _ => try_tx_s!(ERR!("Invalid instructions, ligntning invoice is expected")),
         };
 
-        let max_total_cltv_expiry_delta = self
-            .estimate_blocks_from_duration(taker_payment_args.time_lock_duration)
-            .try_into()
-            .expect("max_total_cltv_expiry_delta shouldn't exceed u32::MAX");
+        // Same budgeting as the maker payment: the demanded final CLTV expiry of
+        // the invoice plus the default hop-delta allowance. Estimate-only budgets
+        // fail when the final equals the budget (find_route refuses on <=).
+        let max_total_cltv_expiry_delta = (invoice.min_final_cltv_expiry() as u32)
+            + DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA;
         // Todo: The path/s used is already logged when PaymentPathSuccessful/PaymentPathFailed events are fired, it might be better to save it to the DB and retrieve it with the payment info.
         let payment = try_tx_s!(self.pay_invoice(invoice, Some(max_total_cltv_expiry_delta)).await);
         Ok(payment.payment_hash.into())
@@ -1412,9 +1421,18 @@ impl MmCoin for LightningCoin {
         let mut payment_params =
             PaymentParameters::from_node_id(protocol_info.node_id.into()).with_route_hints(route_hints);
         let final_cltv_expiry_delta = if is_maker {
-            self.estimate_blocks_from_duration(locktime)
+            // The maker's HTLC carries the whole swap locktime as its CLTV
+            // window, and LDK refuses routing when
+            // payment_params.max_total_cltv_expiry_delta <= final
+            // CLTV expiry (from_node_id keeps the DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA
+            // = 1008 budget), so give the budget the locktime blocks on top
+            // of the default hop-delta allowance.
+            let locktime_blocks: u32 = self
+                .estimate_blocks_from_duration(locktime)
                 .try_into()
-                .expect("final_cltv_expiry_delta shouldn't exceed u32::MAX")
+                .expect("final_cltv_expiry_delta shouldn't exceed u32::MAX");
+            payment_params.max_total_cltv_expiry_delta += locktime_blocks;
+            locktime_blocks
         } else {
             payment_params.max_total_cltv_expiry_delta = self
                 .estimate_blocks_from_duration(locktime)

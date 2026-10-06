@@ -530,6 +530,40 @@ pub struct NetworkInfoNetwork {
     proxy_randomize_credentials: bool,
 }
 
+/// Accept `warnings` in both shapes the daemon versions serve it: a plain string (pre Core 22)
+/// and an array of strings (Core 22+; e.g. `getnetworkinfo` on Komodo/Elektron 4.x).
+fn deserialize_string_or_seq_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrSeqString;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrSeqString {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("string or array of strings")
+        }
+
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            Ok(value.to_owned())
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut joined = String::new();
+            while let Some(element) = seq.next_element::<String>()? {
+                if !joined.is_empty() {
+                    joined.push_str(", ");
+                }
+                joined.push_str(&element);
+            }
+            Ok(joined)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrSeqString)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct NetworkInfo {
@@ -547,6 +581,7 @@ pub struct NetworkInfo {
     #[serde(rename = "timeoffset")]
     time_offset: i64,
     version: u64,
+    #[serde(rename = "warnings", deserialize_with = "deserialize_string_or_seq_string", default)]
     warnings: String,
 }
 

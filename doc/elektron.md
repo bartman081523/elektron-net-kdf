@@ -918,10 +918,99 @@ Everything downstream consumes, nothing derives its own number.
 - **stays open (gates, not done here)**: mainnet `electrs.toml` carries NO
   `fx_orderbook_*` — enabling it means a kdf rpc password on mainnet disk and
   wiring electrs to a live trading daemon (`kdf@trade1`) is the operator's
-  call; the stats page still shows its own estimate and would consume
-  `fx_snapshot_path`/`/fx/rates.json` as the follow-up; the Electrum wallet
-  fork already consumes the project registry rate (see the implemented
-  changes) and can be pointed at the same chain later.
+  call.
+- **status after the FX-HTTP + wallet leg (2026-10-06, implemented and
+  verified live)**:
+  - electrs gained the opt-in `fx_http_addr` HTTP endpoint (`src/fx.rs`
+    `FxHttp`): `GET /fx/rates.json` and `GET /fx/prices.json` straight out
+    of the same `RateState` as banner/RPC/files (nothing derived anywhere),
+    query strings stripped, unknown paths 404; loopback-bound per default
+    setups (mainnet `electrs.toml`: `127.0.0.1:14998`, FX-test instance:
+    `127.0.0.1:14999`). Consumers without Electrum access (stats pages,
+    scripts) read the server's rate over plain HTTP.
+  - the Electrum wallet fork consumes the electrs rate directly now: new
+    `ElektronElectrs` provider in `electrum/exchange_rate.py` polls
+    `blockchain.fx.rates` on the wallet's own server connection (needs no
+    extra ports) and is the fork default (`FX_EXCHANGE`);
+    `ElektronRegistry` (the registry `rate.json` reader) stays as the
+    selectable fallback for wallets not connected to a project electrs.
+  - still open: the stats page keeps its own estimate; it would consume
+    electrs' `fx_snapshot_path` through the elektron-net mempool fork's
+    `/api/v1/prices` (that mempool deployment is external — no local
+    instance), or directly via `fx_http_addr`'s `/fx/prices.json`.
+
+### 14. Lightning swaps: both directions verified on regtest (2026-10-06)
+
+Two kdf instances (`alice` at `:7793`, `bob` at `:7794`, plus a `seed`
+relay; regtest RPC harness) each activated the lightning coins `rBTC-LN`
+and `rELEK-LN` over the same electrum regtest servers as their UTXO
+parents, opened one channel per coin between the LN nodes (10 M sats
+`rBTC-LN` bob→alice, 15 M sats `rELEK-LN` alice→bob), and traded a
+1:1 `rELEK-LN`/`rBTC-LN` book through the normal ordermatch machinery.
+
+- **proof**: three swaps finished on both sides —
+  `98709b38-4e33-46f6-b16f-29b0fb93bbfa` (alice taker / bob maker),
+  `1567508a-1616-4cad-841b-b3f73a1dbcbe` (alice taker / bob maker, born
+  from an instant match of a fresh GTC order against a persistent
+  maker order), and `9714784d-c46b-4de2-9a5b-e5b5b12e9e4a`
+  (alice MAKER via GTC sell `b3789d30-2188-46a3-94ab-de4620174eef` /
+  bob taker FOK `9714784d`…). Ledger after three swaps, exact mirror:
+  alice `rBTC-LN` +300 M msat and `rELEK-LN` −300 M msat, bob inverse;
+  zero fees. Full event chains read back per swap through MMRPC-2.0
+  `my_swap_status` (the legacy top-level shape of that RPC rejects
+  with `lp_swap:1112` HTTP 500).
+- **fix: maker route-precheck CLTV budget** (`lightning.rs`, the
+  `is_maker` arm of the routing precheck): the maker's HTLC carries
+  the whole swap locktime as its CLTV window, and LDK refuses routing
+  when `payment_params.max_total_cltv_expiry_delta <= final CLTV
+  expiry` (`PaymentParameters::from_node_id` keeps only the default
+  1008 hop-delta budget). The fix adds the swap's locktime in blocks
+  (`estimate_blocks_from_duration(locktime)`) to the budget and keeps
+  it as the `final_cltv_expiry_delta`. Verified live: without it the
+  maker-side route precheck rejects every LN swap; with it both swap
+  legs settle.
+- **fix: payment arms budget their invoices** (`lightning.rs`
+  `send_maker_payment` and `send_taker_payment`): both now budget
+  `min_final_cltv_expiry` of the demanded invoice plus
+  `DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA` (=1008) instead of passing
+  `None` (maker) or an estimate-only value (taker). LDK's pre-check
+  refuses on `<=`, so an estimate equal to the final expiry fails —
+  both arms were exercised live (alice-as-maker paid bob's `rELEK-LN`
+  invoice, bob-as-taker paid alice's `rBTC-LN` invoice).
+- **fee estimation robustified for lightning platform coins**
+  (`lightning/ln_platform.rs` `latest_fee_sat`, used by
+  `set_latest_fees`): recent daemons dropped `estimatefee`, some
+  electrum servers reject `blockchain.estimatefee` with a mode
+  argument, and `estimatesmartfee` fails without estimation data —
+  detect/retry/fall back to the daemon relay fee so the LN node always
+  gets some usable feerate.
+- **lightning "addresses"** (`lp_coins.rs`
+  `address_by_coin_conf_and_pubkey_str`, `CoinProtocol::LIGHTNING`
+  arm): a lightning node has no on-chain address — its orderbook items
+  carry the node-id (33-byte compressed pubkey) as their pubkey, so
+  the address is the pubkey itself.
+- **`getnetworkinfo.warnings` shape** (`utxo/rpc_clients.rs`): accept
+  both the string (pre Core 22) and the array-of-strings (Core 22+)
+  shape Core 26+ serves.
+- **operational facts worth keeping for lightning pairs** (all
+  observed live): a fresh GTC maker order matches *instantly* against
+  any opposite order already in the trie (the fresh order becomes the
+  taker of a swap against the older maker — `match_by` defaults to
+  `Any`); the local trie insert of an own order happens ~30 s after
+  the SQLite insert (announcing tick), so a taker ordering against a
+  *just* placed maker needs ≥40 s; every `FailedSwap` auto-bans the
+  counterparty's pubkey for 60 min on the failing side
+  (`ban_pubkey_on_failed_swap`, `PENALTY = 60*60` s, check via
+  `is_pubkey_banned` in the ordermatch message path) — a stale
+  pre-fix-era swap timed out and silently blocked an entire taker
+  request as `Pubkey '...' is not allowed.` until
+  `list_banned_pubkeys` / `unban_pubkeys {"unban_by": {"type":
+  "All"}}` cleared it; ordermatch messages can be delivered twice
+  (deduplicated by the duplicate cache); the seed forwards
+  gossipsub messages it does not process itself. Scratch recipes of
+  the whole campaign live in the regtest scratch harness
+  (`kdf-regtest/scratches/`: `restart_ln_debug.sh`,
+  `activate_regtest.py`, `mirror2_run.py`, channel/swap probes).
 
 ## Upstream sync policy
 

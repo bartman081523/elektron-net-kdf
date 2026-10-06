@@ -3,8 +3,9 @@ use crate::lightning::ln_errors::{SaveChannelClosingError, SaveChannelClosingRes
 use crate::lightning::ln_utils::RpcBestBlock;
 use crate::utxo::rpc_clients::{
     BlockHashOrHeight, ConfirmedTransactionInfo, ElectrumBlockHeader, ElectrumClient, ElectrumNonce, EstimateFeeMethod,
-    UtxoRpcClientEnum, UtxoRpcResult,
+    UtxoRpcClientEnum, UtxoRpcError, UtxoRpcResult,
 };
+use crate::utxo::sat_from_big_decimal;
 use crate::utxo::spv::SimplePaymentVerification;
 use crate::utxo::utxo_standard::UtxoStandardCoin;
 use crate::utxo::GetConfirmedTxError;
@@ -236,48 +237,78 @@ impl Platform {
         self.abortable_system.weak_spawner()
     }
 
-    pub async fn set_latest_fees(&self) -> UtxoRpcResult<()> {
+    /// Resolve the fee the daemon estimates for `n_blocks` confirmation blocks, in sat/kB.
+    ///
+    /// `estimatefee` (EstimateFeeMethod::Standard) has been removed from recent daemon versions
+    /// (e.g. Bitcoin Core 26+), and `detect_fee_method` is only available on the native client
+    /// (see the historical comment above `estimate_fee_sat`). Detect the method the connected
+    /// daemon supports instead of assuming `estimatefee`. On the electrum client, some servers
+    /// reject the two-parameter `blockchain.estimatefee` call (with an `estimate_fee_mode`, e.g.
+    /// `ECONOMICAL`), so drop the mode and retry without it. If no estimator is usable
+    /// (`estimatesmartfee` without estimation data, `estimatefee` removed), fall back to the
+    /// daemon relay fee — LDK needs some feerate to operate, and the relay fee is the closest
+    /// honest lower bound.
+    async fn latest_fee_sat(&self, n_blocks: u32) -> UtxoRpcResult<u64> {
         let platform_coin = &self.coin;
         let conf = &platform_coin.as_ref().conf;
+        let decimals = platform_coin.decimals();
 
-        let latest_background_fees = self
-            .rpc_client()
-            .estimate_fee_sat(
-                platform_coin.decimals(),
-                // Todo: when implementing Native client detect_fee_method should be used for Native and EstimateFeeMethod::Standard for Electrum
-                &EstimateFeeMethod::Standard,
-                &conf.estimate_fee_mode,
-                self.confirmations_targets.background,
-            )
-            .compat()
-            .await?;
-        self.latest_fees.set_background_fees(latest_background_fees);
+        let estimate = match &self.rpc_client() {
+            UtxoRpcClientEnum::Native(native) => match native.detect_fee_method().compat().await {
+                Ok(method) => Some(
+                    self.rpc_client()
+                        .estimate_fee_sat(decimals, &method, &conf.estimate_fee_mode, n_blocks)
+                        .compat()
+                        .await,
+                ),
+                Err(err) => {
+                    error!("Error {} on fee method detection, falling back to the daemon relay fee", err);
+                    None
+                },
+            },
+            _ => match self
+                .rpc_client()
+                .estimate_fee_sat(decimals, &EstimateFeeMethod::Standard, &conf.estimate_fee_mode, n_blocks)
+                .compat()
+                .await
+            {
+                Ok(fee) => Some(Ok(fee)),
+                Err(first_err) => {
+                    error!("Error {} on estimatefee with a fee mode, retrying without it", first_err);
+                    Some(
+                        self.rpc_client()
+                            .estimate_fee_sat(decimals, &EstimateFeeMethod::Standard, &None, n_blocks)
+                            .compat()
+                            .await,
+                    )
+                },
+            },
+        };
 
-        let latest_normal_fees = self
-            .rpc_client()
-            .estimate_fee_sat(
-                platform_coin.decimals(),
-                // Todo: when implementing Native client detect_fee_method should be used for Native and EstimateFeeMethod::Standard for Electrum
-                &EstimateFeeMethod::Standard,
-                &conf.estimate_fee_mode,
-                self.confirmations_targets.normal,
-            )
-            .compat()
-            .await?;
-        self.latest_fees.set_normal_fees(latest_normal_fees);
+        match estimate {
+            Some(Ok(fee)) => Ok(fee),
+            // Both the fee estimator paths (and their retries) have failed: use the daemon relay
+            // fee — the closest honest lower bound LDK can operate with.
+            other => {
+                if let Some(Err(err)) = &other {
+                    error!("Error {} on fee estimation, falling back to the daemon relay fee", err);
+                }
+                let relay_fee = self.rpc_client().get_relay_fee().compat().await?;
+                Ok(sat_from_big_decimal(&relay_fee, decimals)
+                    .map_err(|e| MmError::new(UtxoRpcError::InvalidResponse(e.to_string())))?)
+            },
+        }
+    }
 
-        let latest_high_priority_fees = self
-            .rpc_client()
-            .estimate_fee_sat(
-                platform_coin.decimals(),
-                // Todo: when implementing Native client detect_fee_method should be used for Native and EstimateFeeMethod::Standard for Electrum
-                &EstimateFeeMethod::Standard,
-                &conf.estimate_fee_mode,
-                self.confirmations_targets.high_priority,
-            )
-            .compat()
-            .await?;
-        self.latest_fees.set_high_priority_fees(latest_high_priority_fees);
+    pub async fn set_latest_fees(&self) -> UtxoRpcResult<()> {
+        let background = self.latest_fee_sat(self.confirmations_targets.background).await?;
+        self.latest_fees.set_background_fees(background);
+
+        let normal = self.latest_fee_sat(self.confirmations_targets.normal).await?;
+        self.latest_fees.set_normal_fees(normal);
+
+        let high_priority = self.latest_fee_sat(self.confirmations_targets.high_priority).await?;
+        self.latest_fees.set_high_priority_fees(high_priority);
 
         Ok(())
     }

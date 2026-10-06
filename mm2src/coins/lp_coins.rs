@@ -5972,7 +5972,19 @@ pub fn address_by_coin_conf_and_pubkey_str(
         },
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::LIGHTNING { .. } => {
-            ERR!("address_by_coin_conf_and_pubkey_str is not implemented for lightning protocol yet!")
+            // A lightning node has no on-chain address: its "address" is its node-id.
+            // Orderbook items of lightning coins carry the node-id (compressed pubkey
+            // hex) as their pubkey (LightningCoin::get_public_key), so the address
+            // equals the pubkey, mirroring LightningCoin::address_from_pubkey.
+            let pubkey_bytes = hex::decode(pubkey)
+                .map_err(|e| ERRL!("Invalid lightning node pubkey '{}': {}", pubkey, e))?;
+            if pubkey_bytes.len() != 33 {
+                return ERR!(
+                    "Expected a 33-byte compressed lightning node pubkey, got {} bytes",
+                    pubkey_bytes.len()
+                );
+            }
+            Ok(pubkey.to_owned())
         },
         CoinProtocol::ZHTLC { .. } => ERR!("address_by_coin_conf_and_pubkey_str is not supported for ZHTLC protocol!"),
         // TODO Alright - generating a Sia address in this case requires including the ed25519 pubkey in the OrderbookItem
