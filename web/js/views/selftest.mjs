@@ -134,10 +134,14 @@ async function run() {
         ? { note: numRaw(b.balance) + ' @ ' + cut(b.address || '', 6, 4), body: b } : false;
     });
 
-    // 5 orderbook of the first pair (asks/bids arrays must EXIST; may be empty)
+    // 5 orderbook of the first pair (asks/bids arrays must EXIST; may be
+    // empty). A single-coin deployment cannot form one (base == rel is
+    // rejected by the daemon) — skip loudly like docker/selftest.py does,
+    // a second coin comes from MM_TELEK_ELECTRS / MM_ELEK_ELECTRS.
     const base = coins[0];
-    const rel = coins[1] || coins[0];
-    await step('orderbook ' + base + '/' + rel, async () => {
+    const rel = coins[1];
+    await step(rel ? 'orderbook ' + base + '/' + rel : 'orderbook (no pair)', async () => {
+      if (!rel) return 'skipped: single-coin mode — a pair needs a second coin (MM_TELEK_ELECTRS / MM_ELEK_ELECTRS)';
       const r = await orderbook(base, rel);
       const ob = r.result;
       return ob && Array.isArray(ob.asks) && Array.isArray(ob.bids)
