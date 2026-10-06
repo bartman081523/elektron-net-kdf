@@ -15,7 +15,7 @@ import { on, off, emit } from '../store.mjs';
 // from the instance database on restart.
 
 const PRESETS = [
-  { ticker: 'ELEK', servers: ['192.168.178.21:50002'] },  // machine-local electrs
+  { ticker: 'ELEK', servers: ['127.0.0.1:50002'] },       // machine-local electrs via loopback (any real host goes through the custom form)
   { ticker: 'rELEK', servers: ['127.0.0.1:50003'] },      // regtest (testnet_rpc.py)
   { ticker: 'rBTC', servers: ['127.0.0.1:50004'] },
   { ticker: 'tELEK', servers: ['127.0.0.1:50005'] },      // testnet
