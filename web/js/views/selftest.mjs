@@ -1,8 +1,8 @@
 import { legacy, v2, raw, balance, orderbook } from '../api.mjs';
-import { esc, cut } from '../format.mjs';
+import { esc, cut, num } from '../format.mjs';
 import { loadSession, on, off } from '../store.mjs';
 import * as sse from '../sse.mjs';
-import { fetchFx, FX_PATH } from '../fx.mjs';
+import { fetchFx, FX_PATH, defaultPriceFor } from '../fx.mjs';
 
 // Selftest view (#/selftest?auto=1): in-page contract assertions against the
 // connected daemon (mock or real). PASS rows are binding contract; INFO rows
@@ -131,7 +131,7 @@ async function run() {
       const r = await balance(coins[0]);
       const b = r.result;
       return b && b.balance !== undefined
-        ? { note: num(b.balance) + ' @ ' + cut(b.address || '', 6, 4), body: b } : false;
+        ? { note: numRaw(b.balance) + ' @ ' + cut(b.address || '', 6, 4), body: b } : false;
     });
 
     // 5 orderbook of the first pair (asks/bids arrays must EXIST; may be empty)
@@ -165,6 +165,30 @@ async function run() {
       : '';
     return { note: 'usd=' + snap.usd + ' eur=' + snap.eur + ' src=' + snap.source + market, body: snap };
   }, { infoLevel: true });
+
+  // 5c price-field default derivation (trade view): same precedence as
+  // electrs itself — the real book beats the estimate; the estimate prices
+  // BTC-family rels over usd_per_btc; unknown pairs and missing rates stay
+  // empty (nothing invented). Pure function, so the shapes are synthetic —
+  // the 5b snapshot above pins fetchFx's normalized shape they mirror.
+  await step('price default derivation (defaultPriceFor)', async () => {
+    const book = {
+      usd: 200, eur: 180, usdPerBtc: 100000, time: 1, source: 'p2p_market',
+      market: { pair: 'ELEK/TBTC', bestBid: 0.0009, bestAsk: 0.0011, mid: 0.00099, asks: 3, bids: 3 },
+    };
+    const est = { usd: 200, eur: 180, usdPerBtc: 100000, time: 1, source: 'registry', market: null };
+    const checks = [
+      ['book pair -> real mid', defaultPriceFor(book, { base: 'ELEK', rel: 'TBTC' }) === num(0.00099, 8)],
+      ['book pair w/o mid -> empty', defaultPriceFor({ ...book, market: { ...book.market, mid: null } }, { base: 'ELEK', rel: 'TBTC' }) === ''],
+      ['estimate -> btc-family cross', defaultPriceFor(est, { base: 'ELEK', rel: 'TBTC' }) === num(0.002, 8)],
+      ['estimate -> non-btc rel -> empty', defaultPriceFor(est, { base: 'ELEK', rel: 'ETH' }) === ''],
+      ['no snapshot -> empty', defaultPriceFor(null, { base: 'ELEK', rel: 'TBTC' }) === ''],
+      ['zero usd -> empty', defaultPriceFor({ ...est, usd: null }, { base: 'ELEK', rel: 'TBTC' }) === ''],
+    ];
+    const bad = checks.filter(([, ok]) => !ok).map(([n]) => n);
+    if (bad.length) throw new Error(bad.join('; '));
+    return { note: checks.length + ' precedence checks', body: checks.map(([n]) => n) };
+  });
 
   // 6 provisional shape: my_orders — the recorded body pins the real shape
   await step('my_orders (shape record)', async () => {
@@ -258,7 +282,7 @@ async function sseRoundTrip(coins) {
   }
 }
 
-function num(x) {
+function numRaw(x) {
   if (x === undefined || x === null || x === '') return '0';
   const n = Number(x);
   return Number.isFinite(n) ? String(n) : String(x);

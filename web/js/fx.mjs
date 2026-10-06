@@ -6,7 +6,7 @@
 // A rate is never fabricated here: endpoint off (404), unreachable, or an
 // untrustworthy payload all return null and views render no rate line.
 
-import { esc } from './format.mjs';
+import { esc, num as fmtNum } from './format.mjs';
 
 export const FX_PATH = '/fx/rates.json';
 
@@ -70,6 +70,31 @@ export function fxLineHtml(snap) {
   const bits = [snap.source];
   bits.push(fmtAge(Math.max(0, Math.floor(Date.now() / 1000) - snap.time)) + ' old');
   return esc(`1 ${snap.ticker || 'ELEK'} ≈ ${parts.join(' ≈ ')} (${bits.join(' · ')})`);
+}
+
+// The rel-side coins the snapshot's usd_per_btc reference can price — ELEK is
+// priced over BTC in electrs' source chain, so ELEK/ETH has no derivable price.
+export const BTC_FAMILY = new Set(['BTC', 'TBTC', 'RBTC']);
+
+/** Default for an empty price field (doc/elektron.md §13). Same precedence as
+ *  electrs itself and the same math as the strip it feeds: the real book wins
+ *  over the model estimate (mid when the book matches this pair, otherwise the
+ *  BTC-family cross over usd_per_btc — exactly the strip's derivation). A
+ *  snapshot that cannot price this pair returns '' and the field stays empty —
+ *  never invented. `snap` is a fetchFx() result, `pair` = {base, rel};
+ *  returns a display-shaped string. */
+export function defaultPriceFor(snap, pair) {
+  if (!snap || !pair) return '';
+  if (snap.market) {
+    const [mBase, mRel] = snap.market.pair.split('/').map((s) => s.trim().toLowerCase());
+    if (mBase === pair.base.toLowerCase() && mRel === pair.rel.toLowerCase()) {
+      return snap.market.mid !== null ? fmtNum(snap.market.mid, 8) : '';
+    }
+  }
+  if (BTC_FAMILY.has(pair.rel.toUpperCase()) && snap.usd !== null && snap.usdPerBtc !== null) {
+    return fmtNum(snap.usd / snap.usdPerBtc, 8);
+  }
+  return '';
 }
 
 // Display-only fiat shaping (values are electrs outputs, not daemon strings):

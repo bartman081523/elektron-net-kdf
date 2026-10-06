@@ -2,7 +2,7 @@ import { setPrice, takerOrder, myOrders, cancelOrder, cancelAllOrders, tradePrei
 import { num, vol, ago, esc, cut } from '../format.mjs';
 import { emit } from '../store.mjs';
 import { loadPair, savePair, coinList } from '../market.mjs';
-import { fetchFx, fxLineHtml } from '../fx.mjs';
+import { fetchFx, fxLineHtml, defaultPriceFor, BTC_FAMILY } from '../fx.mjs';
 
 // Trade view. Two order families, mirroring the daemon's split (both pinned
 // on regtest, lp_ordermatch.rs):
@@ -21,7 +21,6 @@ const FX_POLL_MS = 30000;   // electrs refreshes its rate file every 15s
 // Coins quoting the BTC reference electrs reports (usd_per_btc) — pair must
 // match the market pair for book suggestions to apply; anything else can only
 // be shown as a derived cross rate.
-const BTC_FAMILY = new Set(['BTC', 'TBTC', 'RBTC']);
 
 let coins = [];
 let pair = null;               // {base, rel}
@@ -166,7 +165,13 @@ export function render(root) {
     const opts = coins.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
     refs.base.innerHTML = opts;
     refs.rel.innerHTML = opts;
-    const wanted = loadPair();
+    // pair pin via URL (#/trade?pair=BASE/REL) — bookmarkable links and headless
+    // tests; ignored when the coins are not both enabled
+    const qp = (new URLSearchParams(location.hash.split('?').slice(1).join('?')).get('pair') || '').split('/');
+    const byUrl = qp.length === 2 && coins.includes(qp[0]) && coins.includes(qp[1]) && qp[0] !== qp[1]
+      ? { base: qp[0], rel: qp[1] }
+      : null;
+    const wanted = byUrl || loadPair();
     pair = coins.includes(wanted.base) && coins.includes(wanted.rel) && wanted.base !== wanted.rel
       ? wanted
       : { base: coins[0], rel: coins[1] };
@@ -204,6 +209,7 @@ function setPair(next) {
   paintControls();
   paintFx();
   clearFee();
+  maybeDefaultPrice();   // re-seed the empty price field with the new pair's default
   refreshOrders();   // orders panel is per-pair
 }
 
@@ -264,6 +270,19 @@ async function refreshFx() {
   fx = await fetchFx();
   if (!refs) return;                     // view unmounted while in flight
   paintFx();
+  maybeDefaultPrice();
+}
+
+// Seed an empty price field once from the unified estimate (§13) so the form
+// never starts blind: the derived default goes in, the strip's real mid/ask/
+// bid buttons stay the override. Fill-if-empty only — a price the user typed
+// is never clobbered, and an unpriced pair leaves the field empty.
+function maybeDefaultPrice() {
+  if (!refs || !pair || refs.price.value) return;
+  const v = defaultPriceFor(fx, pair);
+  if (v === '') return;
+  refs.price.value = v;
+  debounceFee();
 }
 
 function paintFx() {

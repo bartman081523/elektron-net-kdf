@@ -897,8 +897,21 @@ Everything downstream consumes, nothing derives its own number.
     view's pair; for a different pair quoting in a BTC-family coin a derived
     cross rate over electrs' `usd_per_btc` is shown instead. Filling sets the
     price field and reprices the fee preview.
+  - price default on load (2026-10-06): with an EMPTY price field the trade
+    view auto-fills a first suggestion from the same estimate via
+    `defaultPriceFor` (`web/js/fx.mjs`): the book's `mid` when the strip's
+    market pair is the view's pair, the `usd/usd_per_btc` cross when the
+    relative is a BTC-family coin, and nothing (never invented) when neither
+    holds. Fill-if-empty only — a user-entered price always wins, and the
+    `use mid/ask/bid` buttons keep the same number available on demand.
+    Live proof: `#/trade?pair=tELEK/rBTC` opens with `0.0012` preplaced
+    (cross of usd 103.5 / usd_per_btc 86264 against the local electrs).
   - selftest step 5b: 404 → WARN (feature off), 200 but untrusted → FAIL
     (broken contract), valid snapshot → PASS with the values recorded.
+    Selftest step 5c pins the `defaultPriceFor` derivation with six
+    precedence checks (book pair → mid; BTC-family rel → cross; unrelated
+    pair → no number; non-positive rates → empty) plus the
+    fill-if-empty rule, so the default cannot silently outrank the user.
 - **mock**: `web/test/mock_daemon.py` serves a canned `/fx/rates.json`
   (shape-correct, prices from the mock book) so UI iteration without
   electrs exercises the same gate.
