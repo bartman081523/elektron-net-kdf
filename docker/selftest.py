@@ -2,10 +2,19 @@
 """Marketplace container selftest (stdlib only).
 
 Exercises the full daemon JSON-RPC surface the SPA uses — against BOTH local
-daemons (market 7795, trader 7796) in TESTNET mode. Nothing touches mainnet;
-a failure in the hard matrix aborts the container (deploy gate). Funded
-steps (maker orders need real testnet balances) are skipped loudly with the
-funding addresses printed, so a testnet faucet deposit flips them on.
+daemons (market 7795, trader 7796) in TESTNET mode (BTC family = tBTC, eleks
+coin = tELEK; the mainnet option runs the same matrix with BTC/ELEK).
+Nothing touches mainnet (in testnet mode); a failure in the hard matrix
+aborts the container (deploy gate). Funded steps (maker orders need real
+balances) are skipped loudly with the funding addresses printed, so a coin
+deposit flips them on.
+
+Coin selection is derived from the ACTUAL coins.json the deployment runs on:
+the BTC-family coin is the first of tBTC/BTC carrying a coins-file electrum
+list, the eleks coin the first of tELEK/ELEK gated on MM_TELEK_ELECTRS /
+MM_ELEK_ELECTRS. Coins without a coins-file electrum list are not
+self-activatable (their servers come with the activation request) — steps
+that need them skip loudly instead of failing the gate.
 
 Envelope facts this script relies on (verified in the local T2 campaign):
   legacy  : {"userpass", "method", ...fields} top-level orderbook/setprice/
@@ -151,8 +160,18 @@ def main():
 
     coins = json.load(open(os.path.join(STATE_DIR, "coins.json"), encoding="utf-8"))  # noqa: SIM115
     by_ticker = {c["coin"]: c for c in coins}
-    btc = "tBTC"
-    telek = "tELEK" if TELEK else None
+
+    ELEKS = bool(TELEK) or bool(os.environ.get("MM_ELEK_ELECTRS", "").strip())
+
+    def coin_with_servers(tickers):
+        for t in tickers:
+            if by_ticker.get(t, {}).get("electrum"):
+                return t
+        return None
+
+    btc = coin_with_servers(("tBTC", "BTC"))
+    telek = coin_with_servers(("tELEK", "ELEK")) if ELEKS else None
+    fund_coins = [c for c in (btc, telek) if c]
     urls = lambda c: [s["url"] for s in by_ticker[c]["electrum"]]  # noqa: E731
     # (URL strings from the coins file ride the `servers` request key, never "urls")
 
@@ -164,34 +183,34 @@ def main():
     ver_m = rpc(MARKET_PORT, "version")
     record("market version", "hard", bool(ver_m), str(ver_m))
 
-    try:
-        note = activate(TRADER_PORT, btc, urls(btc))
-        record("activate tBTC (trader)", "hard", True, note)
-    except RpcError as e:
-        record("activate tBTC (trader)", "hard", False, str(e.payload)[:300])
-    try:
-        note = activate(MARKET_PORT, btc, urls(btc))
-        record("activate tBTC (market)", "hard", True, note)
-    except RpcError as e:
-        record("activate tBTC (market)", "hard", False, str(e.payload)[:300])
-
-    record("trader get_enabled_coins has tBTC", "hard",
-           wait_enabled(TRADER_PORT, btc, 120))
-    record("market get_enabled_coins has tBTC", "hard",
-           wait_enabled(MARKET_PORT, btc, 120))
+    for who, port in (("trader", TRADER_PORT), ("market", MARKET_PORT)):
+        if btc is None:
+            skip(f"activate BTC-coin ({who})",
+                 "coins.json has no tBTC/BTC with a coins-file electrum list")
+            skip(f"get_enabled_coins has BTC-coin ({who})",
+                 "no self-activatable BTC-coin — steps skip loudly, not fail")
+        else:
+            try:
+                note = activate(port, btc, urls(btc))
+                record(f"activate {btc} ({who})", "hard", True, note)
+            except RpcError as e:
+                record(f"activate {btc} ({who})", "hard", False, str(e.payload)[:300])
+        if btc is not None:
+            record(f"{who} get_enabled_coins has {btc}", "hard",
+                   wait_enabled(port, btc, 120))
 
     if telek:
         for who, port in (("trader", TRADER_PORT), ("market", MARKET_PORT)):
             try:
                 note = activate(port, telek, urls(telek))
-                record(f"activate tELEK ({who})", "hard", True, note)
+                record(f"activate {telek} ({who})", "hard", True, note)
             except RpcError as e:
-                record(f"activate tELEK ({who})", "hard", False, str(e.payload)[:300])
+                record(f"activate {telek} ({who})", "hard", False, str(e.payload)[:300])
 
-    print("  ---- FUND THE TESTNET WALLET(S): deposit testnet coins to these addresses ----")
+    print("  ---- FUND THE %s WALLET(S): deposit coins to these addresses ----" % "TESTNET")
     bal_t, bal_m = {}, {}
     for who, port in (("trader", TRADER_PORT), ("market", MARKET_PORT)):
-        for coin in [btc] + ([telek] if telek else []):
+        for coin in fund_coins:
             try:
                 b = balance(port, coin)
                 (bal_t if who == "trader" else bal_m)[coin] = b
@@ -200,18 +219,20 @@ def main():
             except RpcError as e:
                 record(f"balance {coin} ({who})", "hard", False, str(e.payload)[:200])
 
-    ob_pair = (btc, telek) if telek else None
+    ob_pair = (btc, telek) if (btc and telek) else None
+    pair_name = f"{ob_pair[0]}/{ob_pair[1]}" if ob_pair else "pair"
     if ob_pair:
         try:
             ob = rpc(TRADER_PORT, "orderbook", fields={"base": ob_pair[0], "rel": ob_pair[1]})
             ok = isinstance(ob, dict) and isinstance(ob.get("asks"), list) \
                 and isinstance(ob.get("bids"), list)
-            record("trader orderbook tBTC/tELEK structure", "hard", ok)
+            record(f"trader orderbook {pair_name} structure", "hard", ok)
         except RpcError as e:
-            record("trader orderbook tBTC/tELEK structure", "hard",
+            record(f"trader orderbook {pair_name} structure", "hard",
                    False, str(e.payload)[:200])
     else:
-        skip("trader orderbook structure", "single-coin mode (set MM_TELEK_ELECTRS for a real pair)")
+        skip("trader orderbook structure",
+             "single-coin mode (set MM_TELEK_ELECTRS / MM_ELEK_ELECTRS for a real pair)")
 
     mo = rpc(TRADER_PORT, "my_orders")
     record("trader my_orders object form", "hard", "maker_orders" in mo and "taker_orders" in mo)
@@ -219,30 +240,43 @@ def main():
     ca = rpc(TRADER_PORT, "cancel_all_orders", fields={"cancel_by": {"type": "All"}})
     record("trader cancel_all_orders (write path)", "hard", ca is not None, str(ca)[:120])
 
-    try:
-        rpc(TRADER_PORT, "electrum", fields={
-            "coin": btc, "servers": [{"url": s} for s in urls(btc)],
-            "required_confirmations": 2, "mature_confirmations": 1})
-        record("re-activate tBTC idempotency (expect err)", "hard", False,
-               "unexpected success — already-activated coin must err")
-    except RpcError as e:
-        record("re-activate tBTC idempotency (expect err)", "hard",
-               "already" in str(e.payload).lower())
+    if btc is not None:
+        try:
+            rpc(TRADER_PORT, "electrum", fields={
+                "coin": btc, "servers": [{"url": s} for s in urls(btc)],
+                "required_confirmations": 2, "mature_confirmations": 1})
+            record(f"re-activate {btc} idempotency (expect err)", "hard", False,
+                   "unexpected success — already-activated coin must err")
+        except RpcError as e:
+            record(f"re-activate {btc} idempotency (expect err)", "hard",
+                   "already" in str(e.payload).lower())
+    else:
+        skip("re-activate idempotency (expect err)",
+             "no self-activatable BTC-coin")
 
-    try:
-        to = bal_t.get(btc, {}).get("address") if bal_t else None
-        rpc(TRADER_PORT, "withdraw", params={
-            "coin": btc, "to": to or "tb1qinsufficientbalanceprobe", "amount": 999999999})
-        record("withdraw huge amount -> err", "hard", False, "unexpected success")
-    except RpcError as e:
-        record("withdraw huge amount -> err", "hard", True, str(e.payload)[:160])
+    if btc is not None:
+        try:
+            to = bal_t.get(btc, {}).get("address") if bal_t else None
+            rpc(TRADER_PORT, "withdraw", params={
+                "coin": btc, "to": to or "tb1qinsufficientbalanceprobe", "amount": 999999999})
+            record("withdraw huge amount -> err", "hard", False, "unexpected success")
+        except RpcError as e:
+            record("withdraw huge amount -> err", "hard", True, str(e.payload)[:160])
+    else:
+        skip("withdraw huge amount -> err",
+             "no self-activatable BTC-coin")
 
-    try:
-        rpc(TRADER_PORT, "trade_preimage", params={
-            "base": "NOSUCHCOIN", "rel": btc, "swap_method": "setprice", "price": "1", "volume": "0.001"})
-        record("trade_preimage bogus coin -> err", "hard", False, "unexpected success")
-    except RpcError as e:
-        record("trade_preimage bogus coin -> err", "hard", True, str(e.payload)[:160])
+    if btc is not None:
+        try:
+            rpc(TRADER_PORT, "trade_preimage", params={
+                "base": "NOSUCHCOIN", "rel": btc, "swap_method": "setprice",
+                "price": "1", "volume": "0.001"})
+            record("trade_preimage bogus coin -> err", "hard", False, "unexpected success")
+        except RpcError as e:
+            record("trade_preimage bogus coin -> err", "hard", True, str(e.payload)[:160])
+    else:
+        skip("trade_preimage bogus coin -> err",
+             "no self-activatable BTC-coin")
 
     try:
         rpc(TRADER_PORT, "my_swap_status", params={"uuid": BOGUS_UUID})
@@ -262,9 +296,10 @@ def main():
            "GET /event-stream -> 200 text/event-stream")
 
     # ---- maker-order path (needs funded testnet balances, else skip) ----
-    if not telek:
+    if not (btc and telek):
         skip("maker setprice/orderbook-visibility/cancel",
-             "no tELEK configured (MM_TELEK_ELECTRS) — single-coin mode cannot form a pair")
+             "no pair in this coin set (need an activatable BTC-coin AND eleks "
+             "coin — MM_TELEK_ELECTRS / MM_ELEK_ELECTRS)")
     else:
         bal_m_btc = Number((bal_m.get(btc) or {}).get("balance"))
         bal_m_tek = Number((bal_m.get(telek) or {}).get("balance"))

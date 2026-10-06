@@ -2,7 +2,9 @@
 """Runtime setup for the elektron-net marketplace container.
 
 Generates (in MM_STATE_DIR, default /run/elek):
-  coins.json       tBTC (+ tELEK when MM_TELEK_ELECTRS is set)
+  coins.json       tBTC (testnet default: MM_COINS_SRC) — plus the optional
+                   eleks coin: tELEK when MM_TELEK_ELECTRS is set (testnet
+                   mode) or ELEK when MM_ELEK_ELECTRS is set (mainnet option)
   market/MM2.json  market-maker daemon config (i_am_seed)
   trader/MM2.json  visitor-facing daemon config (seednodes -> 127.0.0.1)
 
@@ -23,6 +25,9 @@ COINS_SRC = os.environ.get(
 TELEK_TEMPLATE = os.environ.get(
     "MM_TELEK_TEMPLATE", "/app/docker/telek-template.json")
 TELEK_ELECTRS = os.environ.get("MM_TELEK_ELECTRS", "").strip()
+ELEK_TEMPLATE = os.environ.get(
+    "MM_ELEK_TEMPLATE", "/app/docker/elek-template.json")
+ELEK_ELECTRS = os.environ.get("MM_ELEK_ELECTRS", "").strip()
 
 NETID = int(os.environ.get("MM_NETID", "8888"))
 MARKET_RPC = 7795
@@ -76,15 +81,22 @@ def wallet_passphrase(instance: str) -> str:
 def coins() -> list:
     with open(COINS_SRC, encoding="utf-8") as f:
         out = json.load(f)
+
+    def append_elek(template: str, env_value: str) -> None:
+        with open(template, encoding="utf-8") as f:
+            eleks = json.load(f)
+        for server in eleks.get("electrum", []):
+            if server.get("url", "").endswith("_ELECTRUM_PLACEHOLDER"):
+                server["url"] = env_value
+        out.append(eleks)
+
     if TELEK_ELECTRS:
-        with open(TELEK_TEMPLATE, encoding="utf-8") as f:
-            telek = json.load(f)
-        for server in telek.get("electrum", []):
-            if server.get("url") == "TELEK_ELECTRUM_PLACEHOLDER":
-                server["url"] = TELEK_ELECTRS
-        out.append(telek)
-    print(f"coins: {', '.join(c['coin'] for c in out)}"
-          + ("" if TELEK_ELECTRS else "  (tELEK off: MM_TELEK_ELECTRS not set)"))
+        append_elek(TELEK_TEMPLATE, TELEK_ELECTRS)
+    if ELEK_ELECTRS:
+        append_elek(ELEK_TEMPLATE, ELEK_ELECTRS)
+    print(f"coins from {COINS_SRC}: {', '.join(c['coin'] for c in out)}"
+          + ("" if TELEK_ELECTRS else "  (tELEK off: MM_TELEK_ELECTRS not set)")
+          + ("" if ELEK_ELECTRS else "  (ELEK off: MM_ELEK_ELECTRS not set)"))
     return out
 
 

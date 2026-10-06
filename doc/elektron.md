@@ -1012,6 +1012,56 @@ parents, opened one channel per coin between the LN nodes (10 M sats
   (`kdf-regtest/scratches/`: `restart_ln_debug.sh`,
   `activate_regtest.py`, `mirror2_run.py`, channel/swap probes).
 
+### 15. Render self-contained deploy, LAN audit, mainnet option (2026-10-06)
+
+The ghcr image (`docker-publish.yml`, repo-root `Dockerfile`) is now a
+self-contained testnet marketplace: it carries `docker/coins-testnet.json`
+with public tBTC electrum servers (`testnet.aranguren.org:51001`,
+`electrum3.cipig.net:10068`) and bakes the FX snapshot
+(`docker/fx-rates.json`, the electrs `rates_json()` shape in the registry
+reference values — usd 0.25 / eur 0.21, `source: registry`, no `age_secs`
+because a frozen age would lie; the SPA recomputes freshness from `time`).
+The entrypoint exports `MM_WEB_FX_RATES=/app/docker/fx-rates.json` when
+unset, so the out-of-the-box SPA shows the ELEK rate line same-origin at
+`/fx/rates.json` — never fabricated, absent file ⇒ no line. Nothing derived
+in the web layer: an operator wanting a live rate points `MM_WEB_FX_RATES`
+at their electrs' continuously refreshed `fx_rates_path` file.
+
+- **LAN audit (push safety)**: all operator-LAN addresses
+  (192.168.178.x) are out of the git-tracked files —
+  `coins/elektron_overlay.json` (ELEK/tELEK urls), `coins/elektron_coins`
+  (same two entries), and `web/js/views/coins.mjs` (the ELEK preset)
+  now use `127.0.0.1` loopback (the machine-local electrs binds all
+  interfaces; loopback precedents rELEK/rBTC/tELEK were already in the
+  same files). Every remaining 192.168.x hit in the tree is classified
+  and stays: upstream `.docker/container-state` (came in with the
+  GLEECBTC merge `d56a7bc`), a test fixture URI (`nft_tests.rs`,
+  generic doc example), and descriptive deployment docs (`deploy/`,
+  `doc/`); `scratches/` is untracked. The Render container is unaffected
+  by construction — its coins come solely from `docker/coins-testnet.json`
+  (`MM_COINS_SRC`), which only holds public hosts.
+- **selftest coin derivation**: `docker/selftest.py` no longer hardcodes
+  tBTC/tELEK; both coins are derived from the ACTUAL coins.json (first of
+  `tBTC`/`BTC` / of `tELEK`/`ELEK` carrying a coins-file electrum list).
+  Coins without a coins-file electrum list are not self-activatable; hard
+  steps needing them SKIP loudly instead of failing the gate, so a
+  mainnet-mode deployment goes green with zero testnet coins in the chain
+  (and the maker path still skips until a wallet is funded).
+- **mainnet option** (same image, env only — no code-path change):
+  `MM_COINS_SRC=/app/docker/coins-mainnet.json` (BTC mainnet with the
+  public cipig electrum servers, taken from the KomodoPlatform/coins
+  registry `electrums/BTC` and verified live) + `MM_ELEK_ELECTRS=<host>`
+  (splices `docker/elek-template.json` into the coin set through
+  `setup_env.py`, placeholder rewritten) + `MM_NETID=0`. Secrets discipline
+  flips to production: `MM_TEST_SEED`/`MM_RPC_PASS` are then real wallet
+  seeds and an rpc password sitting in the service env.
+- **redeploy note**: the CURRENTLY running Render image predates the
+  `/fx/rates.json` route, so `MM_WEB_FX_RATES` is inert there; the baked
+  snapshot, the LAN-fixed coins files and the FX route all land together
+  with the next image build (push, phase 7), followed by the usual
+  verification chain (`/healthz` → config → daemon `version` → selftest
+  log → SPA selftest 16/16).
+
 ## Upstream sync policy
 
 - Manual security ports from upstream `main`; tag

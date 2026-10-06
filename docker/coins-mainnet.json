@@ -1,0 +1,39 @@
+[
+  {
+    "coin": "BTC",
+    "name": "bitcoin",
+    "fname": "Bitcoin (mainnet, cipig public electrum)",
+    "pubtype": 0,
+    "p2shtype": 5,
+    "wiftype": 128,
+    "segwit": true,
+    "bech32_hrp": "bc",
+    "address_format": {
+      "format": "segwit"
+    },
+    "decimals": 8,
+    "txfee": 1000,
+    "estimate_fee_mode": "ECONOMICAL",
+    "estimate_fee_blocks": 4,
+    "avg_blocktime": 600,
+    "required_confirmations": 2,
+    "mature_confirmations": 100,
+    "derivation_path": "m/84'/0'",
+    "orderbook_ticker": "BTC",
+    "mm2": 1,
+    "protocol": {
+      "type": "UTXO",
+      "chain_variant": "BTC"
+    },
+    "electrum": [
+      {
+        "url": "btc.electrum1.cipig.net:10000",
+        "protocol": "TCP"
+      },
+      {
+        "url": "btc.electrum3.cipig.net:10000",
+        "protocol": "TCP"
+      }
+    ]
+  }
+]

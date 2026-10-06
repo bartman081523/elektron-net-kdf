@@ -11,6 +11,14 @@ PORT="${PORT:-10000}"
 PROXY_UPSTREAM="${MM_PROXY_UPSTREAM:-7796}"
 export MM_STATE_DIR
 
+# electrs' rich-shape FX snapshot is baked into the image (registry reference
+# rate — the container has no electrs of its own; the deployment-local electrs
+# keeps producing the live file). elek-web serves it same-origin at
+# /fx/rates.json; without it the SPA renders no rate line (never fabricated).
+if [ -z "${MM_WEB_FX_RATES:-}" ] && [ -f /app/docker/fx-rates.json ]; then
+    export MM_WEB_FX_RATES=/app/docker/fx-rates.json
+fi
+
 selftest_state="enabled"
 [ "${MM_SKIP_SELFTEST:-0}" = "1" ] && selftest_state="SKIPPED"
 echo "elektron-market: testnet mode, web on 0.0.0.0:${PORT}, selftest ${selftest_state}"
