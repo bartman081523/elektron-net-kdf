@@ -1056,12 +1056,24 @@ at their electrs' continuously refreshed `fx_rates_path` file.
   `setup_env.py`, placeholder rewritten) + `MM_NETID=0`. Secrets discipline
   flips to production: `MM_TEST_SEED`/`MM_RPC_PASS` are then real wallet
   seeds and an rpc password sitting in the service env.
-- **redeploy note**: the CURRENTLY running Render image predates the
-  `/fx/rates.json` route, so `MM_WEB_FX_RATES` is inert there; the baked
-  snapshot, the LAN-fixed coins files and the FX route all land together
-  with the next image build (push, phase 7), followed by the usual
-  verification chain (`/healthz` → config → daemon `version` → selftest
-  log → SPA selftest 16/16).
+- **redeploy note (landed 2026-10-06, phase 7, verified live)**: the baked
+  snapshot, the LAN-fixed coins files and the `/fx/rates.json` route all
+  shipped in image `:sha-c015f0f…` (GHA run for the `docker/**`/`web/**`
+  push; daemon build datetime inside the run window). Verification chain:
+  `/healthz` ok, proxy config
+  (`/elek-web-config.json` → `rpc_proxy:true`, `rpc_pass:""`),
+  `version → 3.0.0-beta_elektron-docker` (the Dockerfile-ARG fallback is
+  deliberate — the workflow omits `KDF_BUILD_TAG` to keep the cargo layer
+  cacheable, traceability lives in the `:sha-<sha>` tag), container
+  selftest `PASS (14/16 ok, 2 skipped)` with the two tELEK steps skipping
+  loudly in single-coin mode, and `/fx/rates.json` serving the baked
+  registry snapshot on the live domain. A follow-up web-only image
+  (`:sha-9309a9a…`) made the SPA selftest skip the orderbook probe loudly
+  in single-coin mode too (it used to fire a doomed `tBTC/tBTC` probe and
+  break the verdict over an environment limit): the live CDP run then
+  reports `PASS 11 · FAIL 0 · WARN 3 · INFO 2 — contract holds` (the three
+  WARNs are mode artifacts with loud reasons: proxy overwrites the
+  password probe, single-coin no-pair, SSE in auto mode).
 
 - **electrs wired to the live market (2026-10-06, P6, verified live)**:
   mainnet `electrs.toml` now carries
