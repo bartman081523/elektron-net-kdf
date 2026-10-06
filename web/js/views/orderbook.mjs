@@ -3,6 +3,7 @@ import { num, vol, esc } from '../format.mjs';
 import { on, off, emit } from '../store.mjs';
 import * as sse from '../sse.mjs';
 import { loadPair, savePair, coinList } from '../market.mjs';
+import { fetchFx, fxLineHtml } from '../fx.mjs';
 
 // Orderbook view. SSE events are a "dirty" flag only: the daemon serializes
 // live order payloads in rational-number arrays (rat form, no decimals), so
@@ -13,6 +14,7 @@ import { loadPair, savePair, coinList } from '../market.mjs';
 
 const POLL_MS = 8000;
 const DEBOUNCE_MS = 400;
+const FX_POLL_MS = 30000;   // electrs refreshes its rate file every 15s
 
 let coins = [];            // enabled tickers
 let pair = null;           // {base, rel}
@@ -23,6 +25,7 @@ const prevPrice = new Map();   // uuid -> price of the previous paint
 let unsubscribePair = null;    // pair currently subscribed on the transport
 
 let pollTimer = null;
+let fxTimer = null;
 let debounceTimer = null;
 let refs = null;               // live element refs (kept between refreshes)
 
@@ -39,6 +42,7 @@ export function render(root) {
           <button id="ob-refresh" class="btn small ghost">refresh</button>
         </div>
       </div>
+      <div class="fx-strip num" id="ob-fx" hidden></div>
       <section class="panel">
         <div class="panel-head">
           <h3 id="ob-ticker"></h3>
@@ -57,6 +61,7 @@ export function render(root) {
     note: document.getElementById('ob-note-text'),
     live: document.getElementById('ob-live'),
     table: document.getElementById('ob-table'),
+    fx: document.getElementById('ob-fx'),
   };
 
   refs.base.addEventListener('change', () => setPair({ base: refs.base.value, rel: refs.rel.value }));
@@ -94,6 +99,8 @@ export function render(root) {
     await refresh();
     subscribePair();       // stream is polish; poll carries regardless
     pollTimer = setInterval(refresh, POLL_MS);
+    refreshFx();           // unified price estimate (SPOC: electrs)
+    fxTimer = setInterval(refreshFx, FX_POLL_MS);
   })();
 
   return cleanup;
@@ -103,8 +110,9 @@ function cleanup() {
   off('sse:orderbook', onBookEvent);
   off('sse-state', onSseState);
   if (pollTimer) clearInterval(pollTimer);
+  if (fxTimer) clearInterval(fxTimer);
   if (debounceTimer) clearTimeout(debounceTimer);
-  pollTimer = debounceTimer = null;
+  pollTimer = fxTimer = debounceTimer = null;
   if (unsubscribePair) sse.unsubscribe(unsubscribePair.base, unsubscribePair.rel);
   unsubscribePair = null;
   prevPrice.clear();
@@ -177,6 +185,16 @@ function paintNote() {
   refs.ticker.textContent = pair ? `${pair.base}/${pair.rel}` : '';
   refs.live.hidden = !streamOn;
   refs.note.textContent = !streamOn ? '' : ' live';
+}
+
+// Unified price estimate strip (electrs /fx via elek-web, same origin).
+// Endpoint off or an untrusted payload -> no line; nothing is fabricated here.
+async function refreshFx() {
+  const snap = await fetchFx();
+  if (!refs) return;                     // view unmounted while in flight
+  const line = fxLineHtml(snap);
+  refs.fx.hidden = !line;
+  refs.fx.innerHTML = line;
 }
 
 // ---- book rendering ---------------------------------------------------------

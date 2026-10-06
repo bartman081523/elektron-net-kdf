@@ -41,6 +41,8 @@ Known deviations from the real daemon (kept provisional, marked in code):
 - maker_orders value shape (MakerOrderForMyOrdersRpc) is a plausible
   reconstruction (unpinned surface; the UI reads it defensively)
 - all books are for the fixed pair ELEK/tBTC; other pairs answer an empty book
+- GET /fx/rates.json serves the canned electrs rich-shape rate (the real rate
+  file is written by electrs' fetcher and served by elek-web, §13)
 
 Modes (POST {"method": "mock.set_mode", "params": {"mode": ...}} or --mode):
   ok     - canned success (default); SSE carries the scripted add/remove cycle
@@ -1057,6 +1059,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == '/fx/rates.json':
+            # Canned electrs rich-shape snapshot. The real file is written by
+            # the electrs fetcher loop and served by elek-web (env
+            # MM_WEB_FX_RATES, doc/elektron.md §13); the mock mirrors the
+            # regtest book shape so the selftest exercises the same trust gate
+            # (prices from BASE_BOOK best levels, fiat = mid * reference).
+            self._send_json(200, {
+                'ticker': 'ELEK',
+                'time': int(time.time()),
+                'age_secs': 0,
+                'usd': 1.2814,
+                'eur': 1.145,
+                'usd_per_btc': 86000.0,
+                'source': 'p2p_market',
+                'market': {
+                    'pair': '%s/%s' % BOOK_PAIR,
+                    'best_bid': 0.0000098,
+                    'best_ask': 0.00002,
+                    'mid': 0.0000149,
+                    'asks': 2,
+                    'bids': 2,
+                },
+            })
+            return
         if parsed.path != '/event-stream':
             self.send_response(404)
             self._cors()

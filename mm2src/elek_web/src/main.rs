@@ -44,6 +44,7 @@ use std::{
 const DEFAULT_ROOT: &str = "web";
 const DEFAULT_ADDR: &str = "127.0.0.1:3000";
 const CONFIG_PATH: &str = "/elek-web-config.json";
+const FX_RATES_PATH: &str = "/fx/rates.json";
 
 /// File extension to MIME. Self-maintained: the workspace has no mime_guess /
 /// rust-embed / include_dir (checked at plan time), and `.mjs` must NOT be
@@ -342,6 +343,7 @@ async fn handle(
     req: Request<Body>,
     root: PathBuf,
     auto_config: Option<(String, String)>,
+    fx_rates: Option<PathBuf>,
     proxy: Option<Proxy>,
     rpc: Client<HttpConnector>,
 ) -> Result<Response<Body>, Infallible> {
@@ -366,6 +368,16 @@ async fn handle(
             } else if path == RPC_PATH_SSE {
                 match &proxy {
                     Some(p) => proxy_sse(&rpc, p, &req).await,
+                    None => not_found(),
+                }
+            } else if path == FX_RATES_PATH {
+                // electrs' rich-shape rates file (doc/elektron.md §13 / §fx):
+                // served same-origin so the SPA can show the unified price
+                // estimate without any other origin. No file configured (or the
+                // file gone) stays a 404 - the SPA hides the rate line, it never
+                // fabricates one.
+                match &fx_rates {
+                    Some(file) => send_file(file.clone(), is_head).await,
                     None => not_found(),
                 }
             } else {
@@ -437,25 +449,39 @@ async fn main() {
             _ => None,
         };
 
+    // Unified price estimate: elek-web serves the electrs FX rates file
+    // same-origin at /fx/rates.json (electrs = single point of responsibility,
+    // see doc/elektron.md §13 and electrs src/fx.rs). The file is written by
+    // the electrs fetcher loop; elek-web only serves it from disk. Unset env or
+    // a missing file degrades to a 404 - nothing is invented at this layer.
+    let fx_rates: Option<PathBuf> = env::var("MM_WEB_FX_RATES")
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+
     println!(
         "elek-web: serving {} on http://{} (SPA talks to the kdf daemon directly)",
         root_canonical.display(),
         addr
     );
     print_auto_config_banner(&auto_config);
+    print_fx_banner(&fx_rates);
 
     let make_svc = make_service_fn(|_conn| {
         let root = root_canonical.clone();
         let auto_config = auto_config.clone();
+        let fx_rates = fx_rates.clone();
         let proxy = proxy.clone();
         let rpc = rpc.clone();
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 let root = root.clone();
                 let auto_config = auto_config.clone();
+                let fx_rates = fx_rates.clone();
                 let proxy = proxy.clone();
                 let rpc = rpc.clone();
-                async move { handle(req, root, auto_config, proxy, rpc).await }
+                async move { handle(req, root, auto_config, fx_rates, proxy, rpc).await }
             }))
         }
     });
@@ -476,6 +502,20 @@ fn print_auto_config_banner(auto_config: &Option<(String, String)>) {
         None => println!(
             "elek-web: no MM_WEB_RPC_URL/MM_WEB_RPC_PASS pair -> {} is a 404, the SPA shows the connect form",
             CONFIG_PATH
+        ),
+    }
+}
+
+fn print_fx_banner(fx_rates: &Option<PathBuf>) {
+    match fx_rates {
+        Some(path) => println!(
+            "elek-web: serving electrs FX rates file {} at {} (rate line in the SPA)",
+            path.display(),
+            FX_RATES_PATH
+        ),
+        None => println!(
+            "elek-web: no MM_WEB_FX_RATES -> {} is a 404 (no rate line in the SPA)",
+            FX_RATES_PATH
         ),
     }
 }

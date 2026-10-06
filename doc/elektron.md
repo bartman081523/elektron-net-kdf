@@ -853,6 +853,63 @@ Setup and truth source (A-grade, everything executed live):
   `ws://` endpoint) cannot be enabled through the UI — Sepolia stays
   exercisable at the RPC layer only (section 8).
 
+### 13. Unified price estimate: electrs as the single point of responsibility (2026-10-05)
+
+One ELEK price everywhere — marketplace price suggestions, electrs, the
+Electrum wallet, the stats page — with ONE component computing it: electrs.
+Everything downstream consumes, nothing derives its own number.
+
+- **Rate chain in `electrs` (`src/fx.rs`)**, refreshed every `fx_refresh_secs`
+  (configured: 15 s):
+  1. `p2p_market` — the live kdf order book (`fx_orderbook_rpc_url`,
+     `fx_orderbook_base/rel`): when at least one resting side exists, the
+     rate IS the market (one-sided books use the only side).
+  2. registry reference — `fx_rate_url` (the project's `rate.json`),
+     used when the order book is empty.
+  3. mining cost floor — a lower bound in the banner, never presented as a
+     market rate.
+  The BTC reference (`usd_per_btc`, for EUR derivation and cross rates) comes
+  from `fx_btc_prices_url` (mempool.space), not from an ELEK exchange.
+- **exposures, all four implemented and verified live** (section 7 config +
+  `blockchain.fx.rates` test): the electrs banner; the
+  `blockchain.fx.rates` RPC (rich shape incl. `source`, `usd_per_btc`, and
+  the market levels `best_bid/best_ask/mid` + side counts);
+  `fx_snapshot_path` (mempool-compatible price JSON for the stats page);
+  `fx_rates_path` (the rich-shape file for the web UI).
+- **secret handling**: the order book RPC password never sits in a config
+  file with a wide Debug surface — `fx_orderbook_userpass` is a
+  `SensitiveUserPass` newtype (redacted `<sensitive>` in `Debug`, same
+  technique as `daemon_auth`) and is passed at start via
+  `ELECTRS_FX_ORDERBOOK_USERPASS` (configure_me `env_prefix`). Verified: the
+  startup config line prints `fx_orderbook_userpass: <sensitive>`.
+- **web layer: SPA + `elek-web`** (this section's implementation):
+  - `mm2src/elek_web` serves the `fx_rates_path` file same-origin at
+    `/fx/rates.json` when `MM_WEB_FX_RATES` is set (works in static and
+    proxy deployments alike — it is just a disk file). Unset or missing file
+    → 404; nothing is invented at the web layer.
+  - `web/js/fx.mjs` fetches it with a trust gate: non-OK, non-JSON, missing
+    or non-positive `usd/eur`/`time`, or a malformed `market` all normalize
+    to `null` — no rate line, never a fabricated number.
+  - orderbook view: a muted rate strip (`1 ELEK ≈ $X ≈ €Y (source · age)`),
+    30 s poll.
+  - trade view: the same strip plus click-to-use price suggestions —
+    `use ask/mid/bid` buttons ONLY when the strip's market pair matches the
+    view's pair; for a different pair quoting in a BTC-family coin a derived
+    cross rate over electrs' `usd_per_btc` is shown instead. Filling sets the
+    price field and reprices the fee preview.
+  - selftest step 5b: 404 → WARN (feature off), 200 but untrusted → FAIL
+    (broken contract), valid snapshot → PASS with the values recorded.
+- **mock**: `web/test/mock_daemon.py` serves a canned `/fx/rates.json`
+  (shape-correct, prices from the mock book) so UI iteration without
+  electrs exercises the same gate.
+- **stays open (gates, not done here)**: mainnet `electrs.toml` carries NO
+  `fx_orderbook_*` — enabling it means a kdf rpc password on mainnet disk and
+  wiring electrs to a live trading daemon (`kdf@trade1`) is the operator's
+  call; the stats page still shows its own estimate and would consume
+  `fx_snapshot_path`/`/fx/rates.json` as the follow-up; the Electrum wallet
+  fork already consumes the project registry rate (see the implemented
+  changes) and can be pointed at the same chain later.
+
 ## Upstream sync policy
 
 - Manual security ports from upstream `main`; tag

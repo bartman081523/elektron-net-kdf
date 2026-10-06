@@ -2,6 +2,7 @@ import { setPrice, takerOrder, myOrders, cancelOrder, cancelAllOrders, tradePrei
 import { num, vol, ago, esc, cut } from '../format.mjs';
 import { emit } from '../store.mjs';
 import { loadPair, savePair, coinList } from '../market.mjs';
+import { fetchFx, fxLineHtml } from '../fx.mjs';
 
 // Trade view. Two order families, mirroring the daemon's split (both pinned
 // on regtest, lp_ordermatch.rs):
@@ -16,6 +17,11 @@ import { loadPair, savePair, coinList } from '../market.mjs';
 
 const ORDERS_POLL_MS = 10000;
 const FEE_DEBOUNCE_MS = 600;
+const FX_POLL_MS = 30000;   // electrs refreshes its rate file every 15s
+// Coins quoting the BTC reference electrs reports (usd_per_btc) — pair must
+// match the market pair for book suggestions to apply; anything else can only
+// be shown as a derived cross rate.
+const BTC_FAMILY = new Set(['BTC', 'TBTC', 'RBTC']);
 
 let coins = [];
 let pair = null;               // {base, rel}
@@ -27,6 +33,8 @@ let ordersErr = '';
 let refs = null;
 let ordersTimer = null;
 let feeTimer = null;
+let fx = null;                 // electrs rate snapshot (null = no trustworthy rate)
+let fxTimer = null;
 
 export function render(root) {
   root.innerHTML = `
@@ -40,6 +48,7 @@ export function render(root) {
         <button id="tr-flip" class="btn small ghost" title="swap base/quote">&hArr;</button>
       </div>
     </div>
+    <div class="fx-strip num" id="tr-fx" hidden></div>
     <div class="page-cols">
       <section class="panel">
         <div class="panel-head">
@@ -115,6 +124,7 @@ export function render(root) {
     orders: document.getElementById('tr-orders'),
     cancelAll: document.getElementById('tr-cancel-all'),
     form: document.getElementById('tr-form'),
+    fx: document.getElementById('tr-fx'),
   };
 
   refs.base.addEventListener('change', () => setPair({ base: refs.base.value, rel: refs.rel.value }));
@@ -126,6 +136,15 @@ export function render(root) {
   refs.buy.addEventListener('click', () => setSide('buy'));
   refs.cancelAll.addEventListener('click', cancelEverything);
   refs.form.addEventListener('submit', place);
+
+  // price suggestions in the fx strip (delegation survives innerHTML repaints)
+  refs.fx.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-fx-use]');
+    if (!btn || !refs) return;
+    showErr('');
+    refs.price.value = btn.getAttribute('data-fx-use');
+    debounceFee();
+  });
 
   for (const el of [refs.price, refs.vol, refs.min, refs.type]) {
     el.addEventListener('input', debounceFee);
@@ -154,8 +173,11 @@ export function render(root) {
     refs.base.value = pair.base;
     refs.rel.value = pair.rel;
     paintControls();
+    paintFx();
     refreshOrders();
     ordersTimer = setInterval(refreshOrders, ORDERS_POLL_MS);
+    refreshFx();           // unified price estimate (SPOC: electrs)
+    fxTimer = setInterval(refreshFx, FX_POLL_MS);
   })();
 
   return cleanup;
@@ -163,8 +185,9 @@ export function render(root) {
 
 function cleanup() {
   if (ordersTimer) clearInterval(ordersTimer);
+  if (fxTimer) clearInterval(fxTimer);
   if (feeTimer) clearTimeout(feeTimer);
-  ordersTimer = feeTimer = null;
+  ordersTimer = fxTimer = feeTimer = null;
   refs = null;
 }
 
@@ -179,6 +202,7 @@ function setPair(next) {
   refs.base.value = pair.base;
   refs.rel.value = pair.rel;
   paintControls();
+  paintFx();
   clearFee();
   refreshOrders();   // orders panel is per-pair
 }
@@ -226,6 +250,52 @@ function clearFee() {
   if (feeTimer) clearTimeout(feeTimer);
   feeTimer = null;
   refs.fee.textContent = '';
+}
+
+// ---- price estimate strip (electrs /fx, same origin) ------------------------
+// The unified estimate feeds two things: a plain rate line, and price
+// suggestions ONLY when the strip's market pair matches this view's pair —
+// ask/mid/bid then come from the live book, so "use X" posts what the market
+// actually shows. A BTC-family quote with a different market pair gets the
+// cross rate derived over electrs' usd_per_btc reference. Never fabricated:
+// no trustworthy snapshot -> no strip.
+
+async function refreshFx() {
+  fx = await fetchFx();
+  if (!refs) return;                     // view unmounted while in flight
+  paintFx();
+}
+
+function paintFx() {
+  if (!refs) return;
+  const line = fxLineHtml(fx);
+  const extra = fxSuggestionsHtml();
+  if (!line && !extra) {
+    refs.fx.hidden = true;
+    refs.fx.innerHTML = '';
+    return;
+  }
+  refs.fx.hidden = false;
+  refs.fx.innerHTML = [line, extra].filter(Boolean).join(' ');
+}
+
+function fxSuggestionsHtml() {
+  if (!fx || !fx.market || !pair) return '';
+  const [mBase, mRel] = fx.market.pair.split('/').map((s) => s.trim().toLowerCase());
+  if (mBase === pair.base.toLowerCase() && mRel === pair.rel.toLowerCase()) {
+    const cands = [
+      ['mid', fx.market.mid],
+      ['ask', fx.market.bestAsk],
+      ['bid', fx.market.bestBid],
+    ].filter(([, v]) => v !== null);
+    return cands.map(([label, v]) =>
+      `<button type="button" class="btn small ghost" data-fx-use="${esc(v)}">use ${esc(label)} ${esc(num(v, 8))}</button>`
+    ).join('');
+  }
+  if (BTC_FAMILY.has(pair.rel.toUpperCase()) && fx.usd !== null && fx.usdPerBtc !== null) {
+    return `<span class="fx-derive">≈ ${esc(num(fx.usd / fx.usdPerBtc, 8))} ${esc(pair.rel)} per ${esc(pair.base)}</span>`;
+  }
+  return '';
 }
 
 // ---- fee preview ------------------------------------------------------------

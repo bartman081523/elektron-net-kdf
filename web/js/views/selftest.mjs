@@ -2,6 +2,7 @@ import { legacy, v2, raw, balance, orderbook } from '../api.mjs';
 import { esc, cut } from '../format.mjs';
 import { loadSession, on, off } from '../store.mjs';
 import * as sse from '../sse.mjs';
+import { fetchFx, FX_PATH } from '../fx.mjs';
 
 // Selftest view (#/selftest?auto=1): in-page contract assertions against the
 // connected daemon (mock or real). PASS rows are binding contract; INFO rows
@@ -143,6 +144,27 @@ async function run() {
         ? { note: ob.asks.length + ' asks / ' + ob.bids.length + ' bids', body: ob } : false;
     });
   }
+
+  // 5b unified price estimate: electrs' rich-shape rates file via elek-web,
+  // same origin (doc/elektron.md §13). Not a daemon call — 404 == WARN
+  // (feature off by env, not broken); a 200 that fails the fetchFx trust gate
+  // is a broken contract == FAIL; a valid snapshot is binding == PASS.
+  await step(FX_PATH + ' (unified price estimate)', async () => {
+    let resp;
+    try {
+      resp = await fetch(FX_PATH, { cache: 'no-cache' });
+    } catch {
+      return 'fetch failed — elek-web itself down?';
+    }
+    if (!resp.ok) return 'endpoint off — HTTP ' + resp.status + ' (no MM_WEB_FX_RATES), rate line hidden';
+    const snap = await fetchFx();
+    if (!snap) return false;   // 200 but untrusted: the gate rejects it
+    const market = snap.market
+      ? ' market=' + snap.market.pair
+        + ' ask=' + (snap.market.bestAsk ?? '—') + ' bid=' + (snap.market.bestBid ?? '—')
+      : '';
+    return { note: 'usd=' + snap.usd + ' eur=' + snap.eur + ' src=' + snap.source + market, body: snap };
+  }, { infoLevel: true });
 
   // 6 provisional shape: my_orders — the recorded body pins the real shape
   await step('my_orders (shape record)', async () => {

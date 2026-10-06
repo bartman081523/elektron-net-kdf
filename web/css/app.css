@@ -430,5 +430,18 @@ td.price { font-weight: 500; }
 .timeline .tl-when { color: var(--muted); margin-left: auto; }
 .timeline .tl-err-text { color: var(--err); }
 
+// unified price estimate strip (electrs /fx via elek-web; hidden when off)
+.fx-strip {
+  font-size: var(--fs-2);
+  color: var(--muted);
+  margin-bottom: var(--sp-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.fx-strip:last-child { margin-bottom: 0; }
+.fx-strip .fx-derive { font-family: var(--font-num); }
+
 tr.rowlink { cursor: pointer; }
 .rowlink.sel { background: var(--panel-2); }
