@@ -187,7 +187,10 @@ def main():
     ver_m = rpc(MARKET_PORT, "version")
     record("market version", "hard", bool(ver_m), str(ver_m))
 
-    for who, port in (("trader", TRADER_PORT), ("market", MARKET_PORT)):
+    # activation ORDER matters: the market seed node is the p2p book responder,
+    # so it gets its coins first (electrum connections + ordermatch books settle
+    # while the trader activates) — the trader's orderbook probe relies on it.
+    for who, port in (("market", MARKET_PORT), ("trader", TRADER_PORT)):
         if btc is None:
             skip(f"activate BTC-coin ({who})",
                  "coins.json has no tBTC/BTC with a coins-file electrum list")
@@ -204,7 +207,7 @@ def main():
                    wait_enabled(port, btc, 120))
 
     if telek:
-        for who, port in (("trader", TRADER_PORT), ("market", MARKET_PORT)):
+        for who, port in (("market", MARKET_PORT), ("trader", TRADER_PORT)):
             try:
                 note = activate(port, telek, urls(telek))
                 record(f"activate {telek} ({who})", "hard", True, note)
@@ -232,14 +235,22 @@ def main():
     ob_pair = (btc, telek) if (btc and telek) else None
     pair_name = f"{ob_pair[0]}/{ob_pair[1]}" if ob_pair else "pair"
     if ob_pair:
-        try:
-            ob = rpc(TRADER_PORT, "orderbook", fields={"base": ob_pair[0], "rel": ob_pair[1]})
-            ok = isinstance(ob, dict) and isinstance(ob.get("asks"), list) \
-                and isinstance(ob.get("bids"), list)
-            record(f"trader orderbook {pair_name} structure", "hard", ok)
-        except RpcError as e:
-            record(f"trader orderbook {pair_name} structure", "hard",
-                   False, str(e.payload)[:200])
+        # The book lives on the p2p netid: even with the market seed's coins
+        # activated, its electrum connections + ordermatch books + the trader
+        # gossipsub topic need a few seconds before GetOrderbook gets answered.
+        ob_ok, ob_note = False, ""
+        for attempt in range(7):
+            try:
+                ob = rpc(TRADER_PORT, "orderbook", fields={"base": ob_pair[0], "rel": ob_pair[1]})
+                ob_ok = isinstance(ob, dict) and isinstance(ob.get("asks"), list) \
+                    and isinstance(ob.get("bids"), list)
+                ob_note = f"ask/bid lists present (attempt {attempt + 1})"
+                break
+            except RpcError as e:
+                ob_note = str(e.payload)[:200]
+                if attempt < 6:
+                    time.sleep(5)
+        record(f"trader orderbook {pair_name} structure", "hard", ob_ok, ob_note)
     else:
         skip("trader orderbook structure",
              "single-coin mode (set MM_TELEK_ELECTRS / MM_ELEK_ELECTRS for a real pair)")
