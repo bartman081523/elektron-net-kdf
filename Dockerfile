@@ -46,13 +46,17 @@ RUN --mount=type=cache,target=/src/target \
     && mkdir -p /out \
     && cp target/release/kdf target/release/elek-web /out/
 
-FROM debian:bookworm-slim
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates python3 curl \
-        libevent-2.1-7 libevent-extra-2.1-7 libevent-pthreads-2.1-7 \
-        libsqlite3-0 libstdc++6 \
-    && rm -rf /var/lib/apt/lists/*
+# The runtime base is Arch (glibc 2.44, libstdc++ GLIBCXX_3.4.35) because the
+# node binaries are built on the Arch host toolchain: elektrond requires
+# GLIBC_2.38 + GLIBCXX_3.4.35 + CXXABI_1.3.15 — bookworm (glibc 2.36, gcc 12)
+# cannot provide those. kdf/elek-web (built on bookworm glibc 2.36) are
+# forward-compatible on the newer glibc. A1b (building elektrond from source
+# in-image) will eventually allow a stable-Debian runtime again.
+FROM archlinux:base
+RUN pacman -Syu --noconfirm \
+        ca-certificates python curl \
+        libevent sqlite gcc-libs \
+    && rm -rf /var/cache/pacman/pkg /var/lib/pacman/sync
 COPY --from=builder /out/kdf /usr/local/bin/kdf
 COPY --from=builder /out/elek-web /usr/local/bin/elek-web
 # Node binaries of the self-contained testnet infra (extra build context:
