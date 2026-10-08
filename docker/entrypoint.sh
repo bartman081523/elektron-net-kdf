@@ -1,10 +1,10 @@
 #!/bin/sh
-# Marketplace container entrypoint (POSIX sh):
-#   setup_env.py -> local testnet infra (elektrond + electrs + miner, default)
-#   -> kdf market + kdf trader -> selftest.py -> elek-web (exec)
-# Selftest failure aborts the container (deploy gate). MM_SKIP_SELFTEST=1 skips.
-# The daemons keep running after the selftest: their coin activations live in
-# RAM and would be lost on a restart.
+# Marketplace container entrypoint (POSIX sh), boot-liveness ordering:
+#   setup_env.py -> elek-web binds FIRST (healthcheck + SPA live from ~1 s)
+#   -> local testnet infra + kdf market + kdf trader boot BEHIND the web
+#   -> selftest.py gate (any hard failure aborts the container) -> watchdog.
+# MM_SKIP_SELFTEST=1 skips the gate. The daemons keep running after the
+# selftest: their coin activations live in RAM and would be lost on a restart.
 set -eu
 
 STATE_DIR="${MM_STATE_DIR:-/run/elek}"
@@ -12,26 +12,9 @@ PORT="${PORT:-10000}"
 PROXY_UPSTREAM="${MM_PROXY_UPSTREAM:-7796}"
 export MM_STATE_DIR
 
-# Rich-shape FX snapshot for the SPA: in self-contained testnet mode the
-# LIVE file written by the in-container electrs replaces the baked registry
-# snapshot (set in the infra block below). Without local testnet infra the
-# baked registry reference file is the only FX source available.
-if [ -z "${MM_WEB_FX_RATES:-}" ] && [ "${MM_LOCAL_TESTNET:-1}" != "1" ] \
-        && [ -f /app/docker/fx-rates.json ]; then
-    export MM_WEB_FX_RATES=/app/docker/fx-rates.json
-fi
-
-selftest_state="enabled"
-[ "${MM_SKIP_SELFTEST:-0}" = "1" ] && selftest_state="SKIPPED"
-# --- self-contained testnet infra (default on) -------------------------------
-# elektrond mines a fresh single-node testnet, the miner loop doubles as the
-# faucet (infra wallet ONLY — the market/trader daemons stay at zero),
-# electrs-tn indexes it and draws its rate from the market orderbook RPC.
-# MM_LOCAL_TESTNET=0 opts out (external electrs via MM_TELEK_ELECTRS, e.g.
-# the mainnet option).
-# NOTE: MM_TELEK_ELECTRS must be exported BEFORE setup_env.py — the coins
-# file (and thus the coin set) is written there; the infra itself needs the
-# generated rpc password, so it starts AFTER setup_env.py.
+# NOTE: MM_TELEK_ELECTRS must be exported BEFORE setup_env.py — the coins file
+# (and thus the coin set) is written there; the infra itself needs the
+# generated rpc password, so it starts BEHIND the web below.
 export MM_LOCAL_TESTNET_DIR="${MM_LOCAL_TESTNET_DIR:-/data/elektron-testnet}"
 if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
     export MM_TELEK_ELECTRS="${MM_TELEK_ELECTRS:-127.0.0.1:50005}"
@@ -39,16 +22,33 @@ if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
 else
     mode="external electrs (${MM_TELEK_ELECTRS:-tBTC-only})"
 fi
+selftest_state="enabled"
+[ "${MM_SKIP_SELFTEST:-0}" = "1" ] && selftest_state="SKIPPED"
 echo "elektron-market: ${mode}, selftest ${selftest_state}"
 python3 /app/docker/setup_env.py
 
 PASS="$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['MM_STATE_DIR'],'trader','MM2.json')))['rpc_password'])")"
 
+# Rich-shape FX source for the SPA, decided BEFORE the web starts: in
+# self-contained mode the LIVE file the in-container electrs writes (it may
+# not exist yet — the first electrs poll fills it ~60 s in); otherwise the
+# baked registry reference snapshot is the only FX source available.
 if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
-    /app/docker/start_testnet_infra.sh "$PASS"
     export MM_WEB_FX_RATES="${MM_WEB_FX_RATES:-$MM_LOCAL_TESTNET_DIR/electrs-tn/fx-rates.json}"
-    echo "elektron-market: local testnet infra up (faucet: $(cat "$MM_LOCAL_TESTNET_DIR/faucet-address.txt" 2>/dev/null || echo n/a))"
+elif [ -z "${MM_WEB_FX_RATES:-}" ] && [ -f /app/docker/fx-rates.json ]; then
+    export MM_WEB_FX_RATES=/app/docker/fx-rates.json
 fi
+
+# elek-web in the background FIRST: healthcheck/SPA answer immediately while
+# everything else boots. Browser POSTs to /rpc land on a not-yet-up daemon
+# until the trader port is up — the SPA's auto-connect retries that gap.
+MM_WEB_ADDR="0.0.0.0:${PORT}" \
+MM_WEB_PROXY_URL="http://127.0.0.1:${PROXY_UPSTREAM}" \
+MM_WEB_RPC_PASS="$PASS" \
+MM_WEB_ROOT=/app/web \
+    elek-web &
+WEB_PID=$!
+echo "elektron-market: elek-web binding 0.0.0.0:${PORT} first (proxy -> 127.0.0.1:${PROXY_UPSTREAM}; daemon boot behind it)"
 
 port_up() {
     python3 -c "import socket,sys;s=socket.socket();s.settimeout(1);sys.exit(0 if s.connect_ex(('127.0.0.1',$1)) == 0 else 1)" 2>/dev/null
@@ -85,6 +85,28 @@ kill_daemons() {
     done
 }
 
+cleanup() {
+    trap - INT TERM EXIT
+    kill_daemons 2>/dev/null || true
+    kill "$WEB_PID" 2>/dev/null || true
+}
+on_signal() {
+    cleanup
+    exit 128
+}
+trap on_signal INT TERM
+trap cleanup EXIT
+
+# ---- the actual boot, behind the web -----------------------------------------
+if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
+    if ! /app/docker/start_testnet_infra.sh "$PASS"; then
+        echo "elektron-market: testnet infra failed — electrs log tail:" >&2
+        tail -n 30 "$MM_LOCAL_TESTNET_DIR/logs/electrs-tn.log" 2>/dev/null >&2 || true
+        exit 1
+    fi
+    echo "elektron-market: local testnet infra up (faucet: $(cat "$MM_LOCAL_TESTNET_DIR/faucet-address.txt" 2>/dev/null || echo n/a))"
+fi
+
 start_daemon market
 # The trader's only seed is the market daemon, and it dials
 # '/ip4/127.0.0.1/tcp/<p2p>' right away while booting. A dial that lands in the
@@ -98,17 +120,13 @@ start_daemon market
 # netid%10 + 20; netid 8888 -> 43331, as both daemons log at boot).
 market_p2p_port="$(python3 -c "import json,os;netid=json.load(open(os.path.join(os.environ['MM_STATE_DIR'],'market','MM2.json'))).get('netid',8888);print((netid//10)*40+7783+netid%10+20)")"
 if ! wait_port "$market_p2p_port" 120; then
-    kill_daemons
     exit 1
 fi
 start_daemon trader
-trap kill_daemons INT TERM
 if ! wait_port 7795 240; then
-    kill_daemons
     exit 1
 fi
 if ! wait_port "$PROXY_UPSTREAM" 240; then
-    kill_daemons
     exit 1
 fi
 
@@ -116,18 +134,33 @@ if [ "${MM_SKIP_SELFTEST:-0}" != "1" ]; then
     if ! python3 /app/docker/selftest.py; then
         echo "elektron-market: SELFTEST FAILED — last kdf log lines:" >&2
         tail -n 40 "$STATE_DIR/market/kdf.out" "$STATE_DIR/trader/kdf.out" >&2 || true
-        kill_daemons
         exit 1
     fi
 fi
 
-# elek-web in the foreground: SPA + same-origin reverse proxy to the trader
-# daemon. The rpc password is injected server-side; browsers never receive it.
-trap - INT TERM
-echo "elektron-market: serving on 0.0.0.0:${PORT} (proxy -> 127.0.0.1:${PROXY_UPSTREAM})"
-exec env \
-    MM_WEB_ADDR="0.0.0.0:${PORT}" \
-    MM_WEB_PROXY_URL="http://127.0.0.1:${PROXY_UPSTREAM}" \
-    MM_WEB_RPC_PASS="$PASS" \
-    MM_WEB_ROOT=/app/web \
-    elek-web
+# Supervisor phase. Watchdog FIRST: 3 consecutive missed daemon-port probes
+# (90 s) abort the container so the platform restarts a wedged stack. It only
+# counts misses once the gate has passed — boot time is the gate's business,
+# not the watchdog's (infra alone may legitimately take minutes to index).
+# Both it and the supervisor run beside the serving web; TERM to this pid-1
+# shell (docker stop, or the watchdog itself as its child) triggers the traps.
+(
+    misses=0
+    while :; do
+        sleep 30
+        if port_up 7795 && port_up "$PROXY_UPSTREAM"; then
+            misses=0
+        else
+            misses=$((misses + 1))
+            if [ "$misses" -ge 3 ]; then
+                echo "elektron-market: kdf daemons unresponsive for ${misses}x30 s — aborting" >&2
+                kill -TERM "$PPID" 2>/dev/null
+                exit 1
+            fi
+        fi
+    done
+) &
+echo $! >"$STATE_DIR/watchdog.pid"
+
+echo "elektron-market: gate passed — serving 0.0.0.0:${PORT}"
+wait "$WEB_PID"

@@ -128,46 +128,62 @@ window.addEventListener('hashchange', route);
 // dev autologin query (test flows only), then this endpoint; whenever
 // anything is missing or fails, the connect form (no session -> the router
 // gates every other view) is still the fallback.
+//
+// Boot-liveness ordering: the container binds elek-web BEFORE the daemons, so
+// a first boot probe can land on a not-yet-up upstream. Retry a bounded few
+// times with a short backoff instead of trapping the visitor on the connect
+// form; a session saved from the connect form (manual or dev autologin) wins
+// over every retry.
+const AUTOCONNECT_ATTEMPTS = 6;
+const AUTOCONNECT_DELAY_MS = 5000;
+const autoSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function tryAutoConnect() {
   if (loadSession()) return;
   const query = new URLSearchParams(location.hash.split('?').slice(1).join('?'));
   if (query.get('dev-url')) return;
-  let cfg;
-  try {
-    const resp = await fetch('/elek-web-config.json');
-    if (!resp.ok) return;                      // endpoint off -> manual flow
-    cfg = await resp.json();
-  } catch {
-    return;
+  let cfg = null;
+  for (let attempt = 1; attempt <= AUTOCONNECT_ATTEMPTS; attempt++) {
+    try {
+      const resp = await fetch('/elek-web-config.json');
+      if (!resp.ok) return;                      // endpoint off -> manual flow
+      const parsed = await resp.json();
+      if (parsed && typeof parsed === 'object') {
+        cfg = parsed;
+        break;
+      }
+    } catch {
+      // transient config hiccup — the bounded loop retries
+    }
+    if (attempt === AUTOCONNECT_ATTEMPTS) return;
+    await autoSleep(AUTOCONNECT_DELAY_MS);
   }
-  if (!cfg || typeof cfg !== 'object') return;
   const base = typeof cfg.rpc_url === 'string' ? cfg.rpc_url.replace(/\/+$/, '') : '';
   const pass = typeof cfg.rpc_pass === 'string' ? cfg.rpc_pass : '';
   // Proxy deployments (elek-web MM_WEB_PROXY_URL): same-origin /rpc, password
   // injected server-side — the SPA connects without ever knowing the pass.
-  if (cfg.rpc_proxy === true) {
-    if (!base) return;
+  const proxied = cfg.rpc_proxy === true;
+  if (proxied ? !base : (!base || !pass)) return;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= AUTOCONNECT_ATTEMPTS; attempt++) {
+    if (loadSession()) return;                   // manual connect won
     try {
-      const { version, coins } = await probe(base, '');
-      saveSession({ url: base, userpass: '', clientId: newClientId(), version, coins: coins.length, proxy: true });
+      const { version, coins } = await probe(base, proxied ? '' : pass);
+      saveSession({ url: base, userpass: proxied ? '' : pass,
+        clientId: newClientId(), version, coins: coins.length,
+        ...(proxied ? { proxy: true } : {}) });
+      // keep deep links (e.g. #/wallet); only redirect connect/empty hashes
       if (!location.hash || location.hash === '#/connect') location.hash = '#/orderbook';
-      emit('toast', { msg: 'connected: kdf ' + version + ', ' + coins.length + ' coin(s) active (proxy mode)' });
+      emit('toast', { msg: `connected: kdf ${version}, ${coins.length} coin(s) active${proxied ? ' (proxy mode)' : ''}` });
+      return;
     } catch (e) {
-      emit('toast', { msg: 'auto-connect failed: ' + (e.message || e), kind: 'err', ms: 6000 });
+      lastErr = e;
     }
-    return;
+    if (attempt === AUTOCONNECT_ATTEMPTS) break;
+    await autoSleep(AUTOCONNECT_DELAY_MS);
   }
-  if (!base || !pass) return;
-  try {
-    const { version, coins } = await probe(base, pass);
-    saveSession({ url: base, userpass: pass, clientId: newClientId(), version, coins: coins.length });
-    // keep deep links (e.g. #/wallet); only redirect connect/empty hashes
-    if (!location.hash || location.hash === '#/connect') location.hash = '#/orderbook';
-    emit('toast', { msg: 'connected: kdf ' + version + ', ' + coins.length + ' coin(s) active' });
-  } catch (e) {
-    emit('toast', { msg: 'auto-connect failed: ' + (e.message || e), kind: 'err', ms: 6000 });
-    // fall through: route() below shows the connect form (no session saved)
-  }
+  emit('toast', { msg: 'auto-connect failed: ' + (lastErr ? lastErr.message || lastErr : 'no response'), kind: 'err', ms: 6000 });
+  // fall through: route() below shows the connect form (no session saved)
 }
 
 tryAutoConnect().finally(route);

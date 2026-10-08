@@ -41,6 +41,21 @@ Open `http://localhost:10000` — the SPA auto-connects through `/rpc`
 (proxy mode, no connect form). Container logs show both daemon logs and
 the selftest result table (including the custody proof).
 
+## Boot order & watchdog
+
+The entrypoint boots the web service FIRST (`/healthz` + SPA answer from
+~1 s, while infra and daemons still boot behind it) so a platform health
+check never sees a cold-start 502. The selftest gate still decides the
+container's life: any hard failure exits the container. After the gate:
+
+- a watchdog probe re-checks the two daemon ports every 30 s; 3 consecutive
+  misses abort the container (platform restart of a wedged stack);
+- if the web process dies, the container exits with it.
+
+Because the web binds before the daemons, the SPA's auto-connect retries
+the probe (bounded, 5 s backoff) — visitors just see the spinner for a few
+seconds on a cold boot instead of the connect form.
+
 ## Environment
 
 | variable            | default                          | meaning                                        |
@@ -77,7 +92,8 @@ the pre-self-contained image (external electrs via `MM_TELEK_ELECTRS`, baked
 
 ## Selftest gate
 
-`docker/selftest.py` (stdlib only) runs before the web service binds:
+`docker/selftest.py` (stdlib only) runs behind the already-bound web service
+and decides the container's life (web first, gate second):
 
 - hard matrix (any failure ⇒ container exit 1, deploy fails): version,
   BTC-coin + eleks-coin activation (3 retries), enabled-coins check,
