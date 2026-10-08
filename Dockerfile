@@ -7,11 +7,15 @@
 #   elek-web             -> SPA + same-origin proxy on 0.0.0.0:$PORT (healthcheck /healthz)
 #
 # Test-Mode-by-default: the only coins enabled are TESTNET coins (tBTC from
-# public electrum servers; tELEK only when MM_TELEK_ELECTRS is set). Before the
-# web service is exposed, docker/selftest.py runs a full read-write API matrix
-# and the deployment FAILS on any hard failure.
+# public electrum servers; tELEK from the in-container electrs). Self-contained
+# by default: the runtime also carries the local testnet infrastructure binaries
+# (elektrond node + electrs indexer) and mines its own chain — the container has
+# no host dependencies. Before the web service is exposed, docker/selftest.py
+# runs the no-custody API matrix and the deployment FAILS on any hard failure.
 #
-# Build:  docker build -t elektron-market .
+# Build:  docker build --build-arg KDF_BUILD_TAG=<sha> -t elektron-market .
+#         (the node binaries come from the extra build context "bin":
+#          --build-context bin=/path/to/staging with `elektrond` + `electrs`)
 # Run:    docker run -p 10000:10000 -e MM_TEST_SEED=... elektron-market
 # See docker/README.md for the full env-var contract.
 
@@ -44,10 +48,16 @@ RUN --mount=type=cache,target=/src/target \
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates python3 \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates python3 curl \
+        libevent-2.1-7 libsqlite3-0 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/kdf /usr/local/bin/kdf
 COPY --from=builder /out/elek-web /usr/local/bin/elek-web
+# Node binaries of the self-contained testnet infra (extra build context:
+# --build-context bin=<staging dir>). CI builds them from source (A1b).
+COPY --from=bin elektrond /usr/local/bin/elektrond
+COPY --from=bin electrs /usr/local/bin/electrs
 COPY web /app/web
 COPY coins /app/coins
 COPY docker /app/docker
@@ -55,6 +65,7 @@ ENV MM_WEB_ROOT=/app/web \
     MM_STATE_DIR=/run/elek \
     MM_COINS_SRC=/app/docker/coins-testnet.json \
     MM_TELEK_TEMPLATE=/app/docker/telek-template.json \
+    MM_LOCAL_TESTNET=1 \
     PORT=10000
 EXPOSE 10000
 ENTRYPOINT ["/app/docker/entrypoint.sh"]

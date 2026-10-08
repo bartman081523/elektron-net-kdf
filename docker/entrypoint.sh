@@ -1,6 +1,7 @@
 #!/bin/sh
 # Marketplace container entrypoint (POSIX sh):
-#   setup_env.py -> kdf market + kdf trader -> selftest.py -> elek-web (exec)
+#   setup_env.py -> local testnet infra (elektrond + electrs + miner, default)
+#   -> kdf market + kdf trader -> selftest.py -> elek-web (exec)
 # Selftest failure aborts the container (deploy gate). MM_SKIP_SELFTEST=1 skips.
 # The daemons keep running after the selftest: their coin activations live in
 # RAM and would be lost on a restart.
@@ -11,20 +12,40 @@ PORT="${PORT:-10000}"
 PROXY_UPSTREAM="${MM_PROXY_UPSTREAM:-7796}"
 export MM_STATE_DIR
 
-# electrs' rich-shape FX snapshot is baked into the image (registry reference
-# rate — the container has no electrs of its own; the deployment-local electrs
-# keeps producing the live file). elek-web serves it same-origin at
-# /fx/rates.json; without it the SPA renders no rate line (never fabricated).
-if [ -z "${MM_WEB_FX_RATES:-}" ] && [ -f /app/docker/fx-rates.json ]; then
+# Rich-shape FX snapshot for the SPA: in self-contained testnet mode the
+# LIVE file written by the in-container electrs replaces the baked registry
+# snapshot (set in the infra block below). Without local testnet infra the
+# baked registry reference file is the only FX source available.
+if [ -z "${MM_WEB_FX_RATES:-}" ] && [ "${MM_LOCAL_TESTNET:-1}" != "1" ] \
+        && [ -f /app/docker/fx-rates.json ]; then
     export MM_WEB_FX_RATES=/app/docker/fx-rates.json
 fi
 
 selftest_state="enabled"
 [ "${MM_SKIP_SELFTEST:-0}" = "1" ] && selftest_state="SKIPPED"
-echo "elektron-market: testnet mode, web on 0.0.0.0:${PORT}, selftest ${selftest_state}"
+if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
+    mode="self-contained (elektrond + electrs + miner inside)"
+else
+    mode="external electrs (MM_TELEK_ELECTRS or tBTC-only)"
+fi
+echo "elektron-market: ${mode}, selftest ${selftest_state}"
 python3 /app/docker/setup_env.py
 
 PASS="$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['MM_STATE_DIR'],'trader','MM2.json')))['rpc_password'])")"
+
+# --- self-contained testnet infra (default on) -------------------------------
+# elektrond mines a fresh single-node testnet, the miner loop doubles as the
+# faucet (infra wallet ONLY — the market/trader daemons stay at zero),
+# electrs-tn indexes it and draws its rate from the market orderbook RPC.
+# MM_LOCAL_TESTNET=0 opts out (external electrs via MM_TELEK_ELECTRS, e.g.
+# the mainnet option).
+export MM_LOCAL_TESTNET_DIR="${MM_LOCAL_TESTNET_DIR:-/data/elektron-testnet}"
+if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
+    export MM_TELEK_ELECTRS="${MM_TELEK_ELECTRS:-127.0.0.1:50005}"
+    /app/docker/start_testnet_infra.sh "$PASS"
+    export MM_WEB_FX_RATES="${MM_WEB_FX_RATES:-$MM_LOCAL_TESTNET_DIR/electrs-tn/fx-rates.json}"
+    echo "elektron-market: local testnet infra up (faucet: $(cat "$MM_LOCAL_TESTNET_DIR/faucet-address.txt" 2>/dev/null || echo n/a))"
+fi
 
 port_up() {
     python3 -c "import socket,sys;s=socket.socket();s.settimeout(1);sys.exit(0 if s.connect_ex(('127.0.0.1',$1)) == 0 else 1)" 2>/dev/null
