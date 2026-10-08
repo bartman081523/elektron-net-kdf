@@ -50,7 +50,8 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates python3 curl \
-        libevent-2.1-7 libsqlite3-0 libstdc++6 \
+        libevent-2.1-7 libevent-extra-2.1-7 libevent-pthreads-2.1-7 \
+        libsqlite3-0 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/kdf /usr/local/bin/kdf
 COPY --from=builder /out/elek-web /usr/local/bin/elek-web

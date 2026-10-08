@@ -23,25 +23,28 @@ fi
 
 selftest_state="enabled"
 [ "${MM_SKIP_SELFTEST:-0}" = "1" ] && selftest_state="SKIPPED"
-if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
-    mode="self-contained (elektrond + electrs + miner inside)"
-else
-    mode="external electrs (MM_TELEK_ELECTRS or tBTC-only)"
-fi
-echo "elektron-market: ${mode}, selftest ${selftest_state}"
-python3 /app/docker/setup_env.py
-
-PASS="$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['MM_STATE_DIR'],'trader','MM2.json')))['rpc_password'])")"
-
 # --- self-contained testnet infra (default on) -------------------------------
 # elektrond mines a fresh single-node testnet, the miner loop doubles as the
 # faucet (infra wallet ONLY — the market/trader daemons stay at zero),
 # electrs-tn indexes it and draws its rate from the market orderbook RPC.
 # MM_LOCAL_TESTNET=0 opts out (external electrs via MM_TELEK_ELECTRS, e.g.
 # the mainnet option).
+# NOTE: MM_TELEK_ELECTRS must be exported BEFORE setup_env.py — the coins
+# file (and thus the coin set) is written there; the infra itself needs the
+# generated rpc password, so it starts AFTER setup_env.py.
 export MM_LOCAL_TESTNET_DIR="${MM_LOCAL_TESTNET_DIR:-/data/elektron-testnet}"
 if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
     export MM_TELEK_ELECTRS="${MM_TELEK_ELECTRS:-127.0.0.1:50005}"
+    mode="self-contained (elektrond + electrs + miner inside)"
+else
+    mode="external electrs (${MM_TELEK_ELECTRS:-tBTC-only})"
+fi
+echo "elektron-market: ${mode}, selftest ${selftest_state}"
+python3 /app/docker/setup_env.py
+
+PASS="$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['MM_STATE_DIR'],'trader','MM2.json')))['rpc_password'])")"
+
+if [ "${MM_LOCAL_TESTNET:-1}" = "1" ]; then
     /app/docker/start_testnet_infra.sh "$PASS"
     export MM_WEB_FX_RATES="${MM_WEB_FX_RATES:-$MM_LOCAL_TESTNET_DIR/electrs-tn/fx-rates.json}"
     echo "elektron-market: local testnet infra up (faucet: $(cat "$MM_LOCAL_TESTNET_DIR/faucet-address.txt" 2>/dev/null || echo n/a))"
