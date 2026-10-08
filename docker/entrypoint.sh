@@ -86,6 +86,21 @@ kill_daemons() {
 }
 
 start_daemon market
+# The trader's only seed is the market daemon, and it dials
+# '/ip4/127.0.0.1/tcp/<p2p>' right away while booting. A dial that lands in the
+# seconds before the market has bound its p2p listen socket fails, and mm2 then
+# suppresses further attempts to the same address for DIAL_RETRY_DELAY = 300 s
+# (mm2_p2p/src/behaviours/atomicdex.rs:74 — the 30 s heartbeat only logs
+# "Connection attempt was already made recently"; smoke #4: the trader stayed
+# peerless for minutes and the orderbook gate failed 22/23). So wait for the
+# market's derived p2p listen port BEFORE starting the trader. The port derives
+# from the netid (lp_network.rs:lp_ports — tcp = (netid/10*40) + 7783 +
+# netid%10 + 20; netid 8888 -> 43331, as both daemons log at boot).
+market_p2p_port="$(python3 -c "import json,os;netid=json.load(open(os.path.join(os.environ['MM_STATE_DIR'],'market','MM2.json'))).get('netid',8888);print((netid//10)*40+7783+netid%10+20)")"
+if ! wait_port "$market_p2p_port" 120; then
+    kill_daemons
+    exit 1
+fi
 start_daemon trader
 trap kill_daemons INT TERM
 if ! wait_port 7795 240; then
