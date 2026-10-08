@@ -460,12 +460,20 @@ async fn main() {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from);
 
-    println!(
-        "elek-web: serving {} on http://{} (SPA talks to the kdf daemon directly)",
-        root_canonical.display(),
-        addr
-    );
-    print_auto_config_banner(&auto_config);
+    match &proxy {
+        Some(p) => println!(
+            "elek-web: serving {} on http://{} (rpc POSTs proxied to {})",
+            root_canonical.display(),
+            addr,
+            p.upstream
+        ),
+        None => println!(
+            "elek-web: serving {} on http://{} (SPA talks to the kdf daemon directly)",
+            root_canonical.display(),
+            addr
+        ),
+    }
+    print_auto_config_banner(&auto_config, &proxy);
     print_fx_banner(&fx_rates);
 
     let make_svc = make_service_fn(|_conn| {
@@ -493,16 +501,22 @@ async fn main() {
         .unwrap_or_else(|e| panic!("elek-web server error: {}", e));
 }
 
-fn print_auto_config_banner(auto_config: &Option<(String, String)>) {
-    match auto_config {
-        Some((rpc_url, _)) => println!(
-            "elek-web: auto-connect enabled -> {} handoff, daemon {}, connect form off",
-            CONFIG_PATH, rpc_url
+fn print_auto_config_banner(auto_config: &Option<(String, String)>, proxy: &Option<Proxy>) {
+    match proxy {
+        Some(p) => println!(
+            "elek-web: auto-connect enabled -> {} handoff (rpc_proxy: true, rpc_pass empty for the browser; POSTs proxied to {}), connect form off",
+            CONFIG_PATH, p.upstream
         ),
-        None => println!(
-            "elek-web: no MM_WEB_RPC_URL/MM_WEB_RPC_PASS pair -> {} is a 404, the SPA shows the connect form",
-            CONFIG_PATH
-        ),
+        None => match auto_config {
+            Some((rpc_url, _)) => println!(
+                "elek-web: auto-connect enabled -> {} handoff, daemon {}, connect form off",
+                CONFIG_PATH, rpc_url
+            ),
+            None => println!(
+                "elek-web: no auto-connect pair (MM_WEB_PROXY_URL/MM_WEB_RPC_PASS or MM_WEB_RPC_URL/MM_WEB_RPC_PASS) -> {} is a 404, the SPA shows the connect form",
+                CONFIG_PATH
+            ),
+        },
     }
 }
 
