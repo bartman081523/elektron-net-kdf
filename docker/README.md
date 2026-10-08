@@ -13,7 +13,7 @@ browser ── https://<service>/            (static SPA, hash router)
         elek-web ─ proxy ─► kdf trader (127.0.0.1:7796)
                                 │ seednodes=127.0.0.1 (DEX netid MM_NETID)
                                 ▼
-                            kdf market (127.0.0.1:7795, i_am_seed)  ← maker orders
+                            kdf market (127.0.0.1:7795, i_am_seed)  ← passive seed node (holds no coins)
 ```
 
 ## Build & run
@@ -27,8 +27,8 @@ docker run --rm -p 10000:10000 -e MM_TEST_SEED=some-fixed-phrase elektron-market
 `elektron-docker` when the argument is omitted.
 
 Open `http://localhost:10000` — the SPA auto-connects through `/rpc`
-(proxy mode, no connect form). Container logs show both daemon logs,
-the selftest result table, and the funding banner.
+(proxy mode, no connect form). Container logs show both daemon logs and
+the selftest result table (including the custody proof).
 
 ## Environment
 
@@ -37,7 +37,7 @@ the selftest result table, and the funding banner.
 | `PORT`              | `10000`                          | public web port (Render injects its own value) |
 | `MM_NETID`          | `8888`                           | DEX P2P netid of the local market/trader pair (mainnet option uses `0`) |
 | `MM_COINS_SRC`      | `/app/docker/coins-testnet.json` | coins file the container runs on — the mainnet option points it at `/app/docker/coins-mainnet.json` |
-| `MM_TEST_SEED`      | random                           | wallet passphrases derive from it (`<seed>-market` / `<seed>-trader`); with a fixed value the deposit addresses are IDENTICAL on every restart, otherwise the wallet starts empty and unfindable after a new boot |
+| `MM_TEST_SEED`      | random                           | wallet passphrases derive from it (`<seed>-market` / `<seed>-trader`); these wallets are PASSIVE (book/price only, no custody — never deposit to them). With a fixed value the addresses are IDENTICAL on every restart |
 | `MM_RPC_PASS`       | generated                        | daemon rpc password (container-internal only)  |
 | `MM_TELEK_ELECTRS`  | unset                            | electrum host:port for tELEK — when unset the coins file only contains tBTC and no pair can form; supply your own LAN/remote electrs server (e.g. `<your-host>:<port>`) |
 | `MM_TELEK_TEMPLATE` | `/app/docker/telek-template.json`| coins-file template for tELEK; its `TELEK_ELECTRUM_PLACEHOLDER` url is rewritten to `MM_TELEK_ELECTRS` |
@@ -61,13 +61,16 @@ points `MM_WEB_FX_RATES` at its own continuously-refreshed file instead.
 `docker/selftest.py` (stdlib only) runs before the web service binds:
 
 - hard matrix (any failure ⇒ container exit 1, deploy fails): version,
-  BTC-coin + eleks-coin activation (3 retries), enabled-coins check, balances,
+  BTC-coin + eleks-coin activation (3 retries), enabled-coins check,
   my_orders envelope, cancel_all write path, already-activated idempotency,
   withdraw insufficient-probe, trade_preimage bogus-coin probe,
-  swap-status bogus-uuid probe, SSE reachability.
-- fund-gated matrix (skipped loudly until testnet funds arrive at the
-  addresses printed by the `★ FUND` banner): maker setprice, visibility of
-  the order on the other daemon (P2P ordermatch), cancel.
+  swap-status bogus-uuid probe, SSE reachability,
+  **no-custody proof**: both daemons must report ZERO balances and ZERO
+  orders — a funded market wallet fails the deploy.
+- coin-gated matrix (skipped loudly when a coin is not in the set): the
+  old maker setprice path is REMOVED by the no-custody contract; order
+  visibility and ordermatch are exercised between client kdf instances
+  (campaign A4), not by the daemons.
 
 Coin selection is derived from the ACTUAL coins.json (the setup_env.py
 output), not from hardcoded tickers: the BTC-family coin is the first of
@@ -81,8 +84,9 @@ steps skip when `MM_TELEK_ELECTRS` is unset — the self-contained default
 stays deployable, and the mainnet mode deploys green without any testnet
 coin in the chain.
 
-Real swaps are exercised in the local E2E campaign (`T5`/`T6` tasks); this
-selftest deliberately does not burn faucet funds.
+Real swaps are exercised between client-side kdf instances (user-owned
+wallets, `T5`/`T6` campaign) — the container itself deliberately holds no
+funds on any chain, testnet or mainnet.
 
 ## Mainnet option
 
@@ -103,12 +107,12 @@ live). ELEK stays operator-supplied as above.
 
 Consequences to weigh before flipping the switch:
 
-- mainnet wallets hold REAL coins: `MM_TEST_SEED` and `MM_RPC_PASS` are then
-  production secrets (on Render they sit in the service env, readable by
-  service collaborators) — treat them accordingly;
-- the selftest runs the same SAFE probes (they never move balances); the
-  fund-gated maker path only runs once a real wallet is funded, and any real
-  swap that follows is a real-money swap;
+- the daemon wallets stay passive and EMPTY on mainnet too: `MM_TEST_SEED`
+  and `MM_RPC_PASS` exist only for the book/price service, never for custody
+  — a deposit into a daemon address would be a contract breach (the selftest
+  FAILS on a nonzero balance on every chain);
+- the selftest runs the same SAFE probes (they never move balances); real
+  swaps happen between user-side kdf instances only;
 - the built-in FX snapshot is a static registry reference rate — point
   `MM_WEB_FX_RATES` at a live file (from an electrs running
   `fx_rate_url`/`fx_orderbook` config) for a live mainnet rate.
@@ -118,11 +122,9 @@ Consequences to weigh before flipping the switch:
 The service deploys from the ghcr image built by
 `.github/workflows/docker-publish.yml` (push to `elektron/main`) with
 health check path `/healthz`. Free-plan disclosures: instance sleeps
-unvisited, disk is ephemeral (`MM_TEST_SEED` keeps the wallet address
-stable), and a funded selfnet wallet's seed sits in the service env
-(testnet-only, not production secrets). The deployed Render service runs
-the testnet default; a mainnet deployment (env above) on a public host
-would be production-grade and needs the secrets discipline.
+unvisited, disk is ephemeral (`MM_TEST_SEED` keeps the passive wallet
+addresses stable). The deployed Render service runs the testnet default;
+the daemon wallets are never funded.
 
 ## Security notes
 

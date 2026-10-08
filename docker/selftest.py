@@ -5,9 +5,13 @@ Exercises the full daemon JSON-RPC surface the SPA uses — against BOTH local
 daemons (market 7795, trader 7796) in TESTNET mode (BTC family = tBTC, eleks
 coin = tELEK; the mainnet option runs the same matrix with BTC/ELEK).
 Nothing touches mainnet (in testnet mode); a failure in the hard matrix
-aborts the container (deploy gate). Funded steps (maker orders need real
-balances) are skipped loudly with the funding addresses printed, so a coin
-deposit flips them on.
+aborts the container (deploy gate).
+
+No-custody contract (2026-10-08): the market daemons hold NO coins and
+place NO orders — custody lives exclusively in the users' own wallets.
+The balance steps are custody proofs (a nonzero daemon balance FAILS the
+gate) and the daemon maker path has been removed entirely; orders on the
+book come exclusively from client kdf instances with user-owned wallets.
 
 Coin selection is derived from the ACTUAL coins.json the deployment runs on:
 the BTC-family coin is the first of tBTC/BTC carrying a coins-file electrum
@@ -143,7 +147,7 @@ def record(name, kind, ok, detail=""):
 
 
 def skip(name, reason):
-    record(name, "fund-gated", None, f"skipped: {reason}")
+    record(name, "coin-gated", None, f"skipped: {reason}")
 
 
 def Number(x):  # kdf balance strings arrive as decimal strings
@@ -207,15 +211,21 @@ def main():
             except RpcError as e:
                 record(f"activate {telek} ({who})", "hard", False, str(e.payload)[:300])
 
-    print("  ---- FUND THE %s WALLET(S): deposit coins to these addresses ----" % "TESTNET")
+    # no-custody proof: ZERO balances are the PASS state. A nonzero balance
+    # means someone deposited into a market wallet — a contract breach, not a
+    # convenience to flip on. Withdraw externally; never deposit here.
+    print("  ---- CUSTODY PROOF: market/trader wallets must hold no coins ----")
     bal_t, bal_m = {}, {}
     for who, port in (("trader", TRADER_PORT), ("market", MARKET_PORT)):
         for coin in fund_coins:
             try:
                 b = balance(port, coin)
                 (bal_t if who == "trader" else bal_m)[coin] = b
-                print(f"  ★ FUND {who:6s} {coin:6s} -> {b.get('address')} "
-                      f"(balance {b.get('balance', b.get('spendable_balance'))})")
+                bal = Number(b.get("balance"))
+                record(f"no-custody balance {coin} ({who})", "hard", bal == 0,
+                       f"balance {b.get('balance')} @ {b.get('address')}" if bal == 0 else
+                       f"CUSTODY BREACH: {bal} held by the {who} wallet "
+                       f"({b.get('address')}) — withdraw externally, never deposit here")
             except RpcError as e:
                 record(f"balance {coin} ({who})", "hard", False, str(e.payload)[:200])
 
@@ -295,49 +305,14 @@ def main():
     record("trader SSE /event-stream reachable", "hard", sse_probe(TRADER_PORT),
            "GET /event-stream -> 200 text/event-stream")
 
-    # ---- maker-order path (needs funded testnet balances, else skip) ----
-    if not (btc and telek):
-        skip("maker setprice/orderbook-visibility/cancel",
-             "no pair in this coin set (need an activatable BTC-coin AND eleks "
-             "coin — MM_TELEK_ELECTRS / MM_ELEK_ELECTRS)")
-    else:
-        bal_m_btc = Number((bal_m.get(btc) or {}).get("balance"))
-        bal_m_tek = Number((bal_m.get(telek) or {}).get("balance"))
-        if bal_m_btc <= 0 and bal_m_tek <= 0:
-            skip("maker setprice/orderbook-visibility/cancel",
-                 f"market wallet is empty — fund {btc} or {telek} at the ★ addresses above")
-        else:
-            try:
-                base_c, rel_c = (btc, telek) if bal_m_btc > 0 else (telek, btc)
-                price = "1"  # test-mode order; price is irrelevant for the ledger
-                volume = str(max(Number((bal_m.get(base_c) or {}).get("balance")) * 0.02, 0))
-                order = rpc(MARKET_PORT, "setprice", fields={
-                    "base": base_c, "rel": rel_c, "price": price,
-                    "volume": volume, "min_volume": str(Number(volume) / 10 or volume),
-                    "order_type": {"type": "GoodTillCancelled"}})
-                uuid = order.get("uuid")
-                record("maker setprice " + "-".join((base_c, rel_c)), "fund-gated",
-                       isinstance(uuid, str) and len(uuid) > 10)
-                n_mine = n_orders(rpc(MARKET_PORT, "my_orders"))
-                record("maker my_orders == 1", "fund-gated", n_mine == 1, f"n={n_mine}")
-                if uuid:
-                    seen = False
-                    end = time.time() + 90
-                    while time.time() < end and not seen:
-                        ob = rpc(TRADER_PORT, "orderbook", fields={"base": base_c, "rel": rel_c})
-                        side = ob.get("asks" if base_c == btc else "bids") or []
-                        seen = any(o.get("is_mine") or o.get("price") for o in side)
-                        if seen:
-                            break
-                        time.sleep(5)
-                    record("order visible on trader daemon", "fund-gated", seen,
-                           f"polling {'asks' if base_c == btc else 'bids'}")
-                    rpc(MARKET_PORT, "cancel_order", fields={"uuid": uuid})
-                    record("maker cancel_order", "fund-gated", True)
-                n_after = n_orders(rpc(MARKET_PORT, "my_orders"))
-                record("maker my_orders == 0 after cancel", "fund-gated", n_after == 0, f"n={n_after}")
-            except RpcError as e:
-                record("maker order path", "fund-gated", False, str(e.payload)[:300])
+    # ---- daemon maker path REMOVED (no-custody contract) ------------------
+    # The daemons place no orders of their own; book entries come exclusively
+    # from client kdf instances with user-owned wallets (e2e proof: campaign
+    # A4 client-swap). Zero orders on both daemons is the binding PASS state.
+    n_m = n_orders(rpc(MARKET_PORT, "my_orders"))
+    record("market daemon holds no orders", "hard", n_m == 0, f"n={n_m}")
+    n_t2 = n_orders(rpc(TRADER_PORT, "my_orders"))
+    record("trader daemon holds no orders", "hard", n_t2 == 0, f"n={n_t2}")
 
     fails = [r for r in RESULTS if r["ok"] is False]
     skips = [r for r in RESULTS if r["ok"] is None]
