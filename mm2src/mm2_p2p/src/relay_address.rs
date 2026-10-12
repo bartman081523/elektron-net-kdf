@@ -363,9 +363,7 @@ fn test_ws_relay_address_to_multiaddr() {
     use crate::NetworkInfo;
 
     let ports = NetworkPorts { tcp: 43331, wss: 43341 };
-    let distributed = NetworkInfo::Distributed {
-        network_ports: ports,
-    };
+    let distributed = NetworkInfo::Distributed { network_ports: ports };
 
     // `elektron-market.onrender.com:443`: our render.com seed form. DNS
     // names resolve DUAL-STACK (`/dns/`, A+AAAA) so IPv6-only peers can

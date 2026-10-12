@@ -892,10 +892,7 @@ impl<MakerCoin: MmCoin + MakerCoinSwapOpsV2, TakerCoin: MmCoin + TakerCoinSwapOp
 
     fn on_event(&mut self, event: &TakerSwapEvent) {
         match event {
-            TakerSwapEvent::Initialized {
-                taker_payment_fee,
-                ..
-            } => {
+            TakerSwapEvent::Initialized { taker_payment_fee, .. } => {
                 let swaps_ctx = SwapsContext::from_ctx(&self.ctx).expect("from_ctx should not fail at this point");
                 let taker_coin_ticker: String = self.taker_coin.ticker().into();
                 let new_locked = LockedAmountInfo {

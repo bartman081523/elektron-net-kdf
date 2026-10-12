@@ -174,11 +174,8 @@ impl Qrc20Coin {
             }
 
             // `history_map` has been updated.
-            let to_write: Vec<TransactionDetails> = history_map
-                .values()
-                .flatten()
-                .map(|(_tx_id, tx)| tx.clone())
-                .collect();
+            let to_write: Vec<TransactionDetails> =
+                history_map.values().flatten().map(|(_tx_id, tx)| tx.clone()).collect();
             if let Err(e) = self.save_history_to_file(&ctx, to_write).compat().await {
                 ctx.log.log(
                     "",
