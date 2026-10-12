@@ -39,16 +39,30 @@ elif [ -z "${MM_WEB_FX_RATES:-}" ] && [ -f /app/docker/fx-rates.json ]; then
     export MM_WEB_FX_RATES=/app/docker/fx-rates.json
 fi
 
+# p2p federation over HTTPS: remote kdf nodes dial their seed as
+# wss://<public-domain>:443 (RelayAddress::WebSocket fork patch), render
+# terminates TLS at its edge and hands the plain websocket upgrade to
+# elek-web, which splices it onto the market daemon's plain-ws listener
+# (fork patch in mm2_p2p/src/behaviours/atomicdex.rs — the market has no
+# wss_certs, so it binds /ws on the netid-derived wss port, +30).
+# Websocket framing stays end-to-end between the dialing node and the
+# market. During the boot window the market has not bound yet — the splice
+# then answers 502 and the dialing node reschedules after
+# DIAL_RETRY_DELAY (300 s, atomicdex.rs:74); long-lived dialers re-try.
+netid="$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['MM_STATE_DIR'],'market','MM2.json'))).get('netid',8888))")"
+market_ws_port="$(( (netid / 10) * 40 + 7783 + netid % 10 + 30 ))"
+
 # elek-web in the background FIRST: healthcheck/SPA answer immediately while
 # everything else boots. Browser POSTs to /rpc land on a not-yet-up daemon
 # until the trader port is up — the SPA's auto-connect retries that gap.
 MM_WEB_ADDR="0.0.0.0:${PORT}" \
 MM_WEB_PROXY_URL="http://127.0.0.1:${PROXY_UPSTREAM}" \
 MM_WEB_RPC_PASS="$PASS" \
+MM_WEB_P2P_BRIDGE="127.0.0.1:${market_ws_port}" \
 MM_WEB_ROOT=/app/web \
     elek-web &
 WEB_PID=$!
-echo "elektron-market: elek-web binding 0.0.0.0:${PORT} first (proxy -> 127.0.0.1:${PROXY_UPSTREAM}; daemon boot behind it)"
+echo "elektron-market: elek-web binding 0.0.0.0:${PORT} first (proxy -> 127.0.0.1:${PROXY_UPSTREAM}; p2p ws bridge -> 127.0.0.1:${market_ws_port}; daemon boot behind it)"
 
 port_up() {
     python3 -c "import socket,sys;s=socket.socket();s.settimeout(1);sys.exit(0 if s.connect_ex(('127.0.0.1',$1)) == 0 else 1)" 2>/dev/null
