@@ -543,6 +543,18 @@ jobs:
           export PATH=$PATH:/android-ndk/bin
           CC_aarch64_linux_android=aarch64-linux-android21-clang CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=aarch64-linux-android21-clang cargo rustc --target=aarch64-linux-android --lib --release --crate-type=staticlib --package mm2_bin_lib
 
+      # #86: this fork has no FILE_SERVER_KEY, so the file-server "Compress /
+      # Upload" steps below are always skipped — expose the staticlib as a
+      # GitHub artifact instead (gh run download) so #84 can pull it.
+      - name: Rename staticlib to libkdf.a
+        run: cp target/aarch64-linux-android/release/libkdflib.a target/aarch64-linux-android/release/libkdf.a
+
+      - name: Upload build for next job
+        uses: actions/upload-artifact@v4
+        with:
+          name: aarch64-linux-android-libkdf
+          path: target/aarch64-linux-android/release/libkdf.a
+
       - name: Compress kdf build output
         env:
           AVAILABLE: ${{ secrets.FILE_SERVER_KEY }}
