@@ -24,6 +24,14 @@
 //! Precedence: proxy mode replaces the direct auto_config handoff (a config
 //! that would leak MM_WEB_RPC_PASS to browsers), but static files keep
 //! working either way.
+//!
+//! P2P bridge (render.com federation, see bridge.rs): when MM_WEB_P2P_BRIDGE
+//! is set to the relay's plain-ws listener, websocket upgrade requests (a
+//! native kdf node dialing its seed as wss://<domain>/ through the render.com
+//! HTTPS route) are spliced byte-wise to the relay instead of being routed as
+//! ordinary HTTP.
+
+mod bridge;
 
 use hyper::{
     body::to_bytes as body_to_bytes,
@@ -346,7 +354,16 @@ async fn handle(
     fx_rates: Option<PathBuf>,
     proxy: Option<Proxy>,
     rpc: Client<HttpConnector>,
+    bridge: Option<SocketAddr>,
 ) -> Result<Response<Body>, Infallible> {
+    // P2P splice bridge takes absolute precedence over routing: a websocket
+    // upgrade is never an ordinary HTTP resource (see bridge.rs). Everything
+    // else falls through to the routing table below.
+    if let Some(addr) = bridge {
+        if bridge::is_ws_upgrade(&req) {
+            return Ok(bridge::splice(req, addr).await);
+        }
+    }
     let is_head = matches!(*req.method(), Method::HEAD);
     let method = req.method().clone();
     let path = req.uri().path().to_string();
@@ -460,6 +477,20 @@ async fn main() {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from);
 
+    // P2P splice bridge: the kdf relay's plain-ws listener (this server rides
+    // in front of it in container deployments; see bridge.rs). ip:port only —
+    // deployments put both on loopback, and the relay binds an interface the
+    // web server dials locally.
+    let bridge: Option<SocketAddr> = env::var("MM_WEB_P2P_BRIDGE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            v.parse().unwrap_or_else(|e| {
+                panic!("MM_WEB_P2P_BRIDGE must parse as ip:port, got {:?}: {}", v, e)
+            })
+        });
+
     match &proxy {
         Some(p) => println!(
             "elek-web: serving {} on http://{} (rpc POSTs proxied to {})",
@@ -475,6 +506,7 @@ async fn main() {
     }
     print_auto_config_banner(&auto_config, &proxy);
     print_fx_banner(&fx_rates);
+    print_bridge_banner(&bridge);
 
     let make_svc = make_service_fn(|_conn| {
         let root = root_canonical.clone();
@@ -482,6 +514,7 @@ async fn main() {
         let fx_rates = fx_rates.clone();
         let proxy = proxy.clone();
         let rpc = rpc.clone();
+        let bridge = bridge.clone();
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 let root = root.clone();
@@ -489,7 +522,10 @@ async fn main() {
                 let fx_rates = fx_rates.clone();
                 let proxy = proxy.clone();
                 let rpc = rpc.clone();
-                async move { handle(req, root, auto_config, fx_rates, proxy, rpc).await }
+                let bridge = bridge.clone();
+                async move {
+                    handle(req, root, auto_config, fx_rates, proxy, rpc, bridge).await
+                }
             }))
         }
     });
@@ -530,6 +566,18 @@ fn print_fx_banner(fx_rates: &Option<PathBuf>) {
         None => println!(
             "elek-web: no MM_WEB_FX_RATES -> {} is a 404 (no rate line in the SPA)",
             FX_RATES_PATH
+        ),
+    }
+}
+
+fn print_bridge_banner(bridge: &Option<SocketAddr>) {
+    match bridge {
+        Some(addr) => println!(
+            "elek-web: p2p bridge enabled -> websocket upgrades spliced to the kdf relay plain-ws listener at {}",
+            addr
+        ),
+        None => println!(
+            "elek-web: p2p bridge disabled (MM_WEB_P2P_BRIDGE unset) -> websocket upgrades are not served"
         ),
     }
 }

@@ -794,6 +794,15 @@ fn start_gossipsub(
             if wss_certs.is_some() {
                 let wss_addr: Multiaddr = format!("/ip4/{}/tcp/{}/wss", ip, network_ports.wss).parse().unwrap();
                 libp2p::Swarm::listen_on(&mut swarm, wss_addr).unwrap();
+            } else {
+                // elektron-net fork: without TLS certs, still accept plain
+                // websocket P2P dials on the netid-derived wss port. render.com
+                // terminates TLS at its edge and elek-web splices the HTTP
+                // upgrade onto this port, so the relay never needs its own
+                // cert; /ws (plain) and /wss (via wss_certs) share the port
+                // because a single port cannot serve both listeners.
+                let ws_addr: Multiaddr = format!("/ip4/{}/tcp/{}/ws", ip, network_ports.wss).parse().unwrap();
+                libp2p::Swarm::listen_on(&mut swarm, ws_addr).unwrap();
             }
         },
         NodeType::RelayInMemory { port } => {
