@@ -1100,6 +1100,59 @@ at their electrs' continuously refreshed `fx_rates_path` file.
   `electrs-fx-test.toml`, which is deliberately NOT tracked — it documents
   the wiring recipe).
 
+### 16. B3: phone "Tausch" UI + real tELEK↔tBTC e2e market coin (2026-10-12)
+
+Kampagne #61 continuation. The marketplace coin layer, the phone UI and the
+deploy chain all landed in one night-session (details also live in the
+stand-alone runbook `scratches/B2-android-deploy-runbook.md` § B3 in the
+operator workspace, untracked by design).
+
+- **tBTC is now the fork's own testnet second slot** (`docker/coins-testnet.json`,
+  commit `0d19fa7`): real bitcoin testnet3 is replaced by a coin on the Elektron
+  fork testnet itself — derivation `m/84'/1'`, HRP `tb`, electrs-tn
+  `127.0.0.1:50005`. No faucet dependency (all public testnet3 faucets are
+  captcha/Cloudflare-gated). The market `tBTC/tELEK` pair is therefore
+  **fully self-contained**, and the phone wallet (m/0h electrumv2 seed) sees
+  the same chain. Selftest after the restart: **PASS 23/23**.
+- **Real non-custodial phone swap (e2e)**: the phone's Market dialog
+  ("Jetzt tauschen") drives `buy` through a **user-owned client kdf** on the
+  host (socat 10101 → kdf :7797, phrase-derived user wallet, ~25 tELEK) that
+  matches a **maker order of a second user-owned kdf** (setprice 1 tBTC @
+  1 tELEK, uuid `7bddb43e`). Swap `cd02d170` finished on **both sides**;
+  the container market/trader daemons stayed **0 balance / 0 orders**
+  (measured right after the swap — the M2 contract holds under a real trade).
+  Custody note: the phone's electrum wallet (electrumv2 seed derivation) and a
+  kdf wallet (BIP39 derivation) produce different addresses from the same
+  phrase, so a real phone-wallet custodial participation needs kdf-on-device
+  with electrumv2 seed support — future work; the UI is the remote control for
+  the user-owned host kdf, which is exactly the M2 model.
+- **elec_market plugin gained a QML side** (`plugins/elek_market/qml.py`,
+  `PluginQObject` from `electrum.gui.common_qt.plugins`): rates + orderbook +
+  `buy` with the `plugins.elek_market.swap_endpoint`/`swap_userpass` config
+  (user-owned kdf; default falls back to the read-only market `/rpc` proxy).
+  QML-side lessons baked into the code: SimpleConfig plugin keys live **nested**
+  (`{"plugins": {"elek_market": {...}}}`) — flat keys are never read; the
+  `ELEK_MARKET_*` ConfigVars are property descriptors on `SimpleConfig`
+  (direct access, no `.get()`); `self.plugin` is an attribute, not a callable;
+  the `QEAppController.plugin()` lookup requires the `so` alias.
+  Bottom bar "Tausch" beside Receive/Send (`WalletMainView.qml`) opens
+  `MarketPage.qml` (FX line from `/fx/rates.json`, live orderbook, swap button).
+- **Dockerfile A1b landed** (commit `3fb1c4c`): the image builds elektrond
+  (from `bartman081523/elektron-net` branch `fork-main`, `ENABLE_IPC=OFF`,
+  same-Arch toolchain keeps the runtime ABI) and electrs (from
+  `bartman081523/elektron-net-electrs` branch `elektron/61-market-api`)
+  **from source in-image** — the external `bin` build context is gone, so
+  `docker-publish` now builds green without it (run 38184174354 was the pull-
+  denied failure; run 38189026054 is the green A1b build). Both the feature
+  branch `elektron/61-market-api` and `elektron/main` carry the change; the
+  ghcr tags `:latest/:testnet/:sha-3fb1c4c` are pushed.
+- **Android APK burn-in**: the APK run 38171315619 shipped a corrupt
+  `libpybundle.so` (13172128 B → black-screen boot); a clean rerun
+  (38189051984) produced the working 13172129 B bundle — all B3 fixes are
+  compiled into the APK's `.pyc`s (no more run-as source overlays needed
+  after the phone is unlocked; the overlay used during the session is
+  documented in the runbook).
+
 ## Upstream sync policy
 
 - Manual security ports from upstream `main`; tag
