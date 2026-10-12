@@ -54,10 +54,13 @@ pub struct WsRelayAddress {
 
 impl std::fmt::Display for WsRelayAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.secure {
-            write!(f, "wss://{}:{}", self.host, self.port)
+        let scheme = if self.secure { "wss" } else { "ws" };
+        // URI-standard bracket form for IPv6 literals (stored un-bracketed,
+        // see `from_host_port`): `ws://[::1]:10200`.
+        if std::net::Ipv6Addr::from_str(&self.host).is_ok() {
+            write!(f, "{scheme}://[{}]:{}", self.host, self.port)
         } else {
-            write!(f, "ws://{}:{}", self.host, self.port)
+            write!(f, "{scheme}://{}:{}", self.host, self.port)
         }
     }
 }
@@ -114,6 +117,40 @@ impl FromStr for RelayAddress {
 
 impl WsRelayAddress {
     fn from_host_port(s: &str, secure: bool) -> Result<Self, ()> {
+        // A bracketed IPv6 literal carries ':' inside the address itself, so
+        // it must be split out BEFORE any "host:port" splitting. The stored
+        // host is WITHOUT brackets (`Display` and `ws_multiaddr` re-derive
+        // them, so parsing round-trips).
+        if let Some(after_open) = s.strip_prefix('[') {
+            let (inner, rest) = match after_open.split_once(']') {
+                Some((inner, rest)) => (inner, rest),
+                None => return Err(()),
+            };
+            let port: u16 = match rest.strip_prefix(':') {
+                Some(port_str) => port_str.parse().map_err(|_| ())?,
+                None if rest.is_empty() => if secure { 443 } else { 80 },
+                None => return Err(()),
+            };
+            if port == 0 {
+                return Err(());
+            }
+            let inner = inner.to_ascii_lowercase();
+            if std::net::Ipv6Addr::from_str(&inner).is_err() {
+                return Err(());
+            }
+            return Ok(WsRelayAddress {
+                host: inner,
+                port,
+                secure,
+            });
+        }
+        // Unbracketed form: split at the last ':'; the host must stay an
+        // IPv4 literal or a DNS name. Bare IPv6 is rejected throughout — a
+        // port-less dual-colon literal ("::1") is unsavable here (the ":" +
+        // digits would be read as a port) and even a colon-suffixed one
+        // ("2001:db8::1:8080") is ambiguous between address+port and a
+        // longer address, per RFC 3986 the bracket form is the only way to
+        // write an IPv6 websocket seed: "ws://[2001:db8::1]:8080".
         let (host, port) = match s.rsplit_once(':') {
             Some((host, port)) => {
                 let port: u16 = port.parse().map_err(|_| ())?;
@@ -124,7 +161,8 @@ impl WsRelayAddress {
         if port == 0 {
             return Err(());
         }
-        // hosts are DNS names, case-insensitive: normalize to lowercase
+        // hosts are IPv4 literals or DNS names, case-insensitive: normalize
+        // to lowercase
         let host = host.to_ascii_lowercase();
         if host.is_empty() {
             return Err(());
@@ -204,10 +242,19 @@ fn dns_multiaddr(dns_addr: &str, ports: NetworkPorts) -> Multiaddr {
 /// side trusts the system-wide webpki roots by default, see
 /// transports/websocket/src/tls.rs in the libp2p fork) both work.
 fn ws_multiaddr(addr: &WsRelayAddress) -> Multiaddr {
+    // `Protocol::Dns` is the DUAL-STACK resolver branch (transports/dns in
+    // the libp2p fork: `resolver.lookup_ip` collects A *and* AAAA records
+    // and the dial tries each resolved candidate until one succeeds), so a
+    // DNS seed node dials from IPv4-only and IPv6-only machines alike.
+    // `/dns4/` (A records only) would strand IPv6-only peers. IPv6 literals
+    // map to `/ip6/`; `Protocol::Dns6`-style AAAA-only dialing stays out of
+    // scope here.
     let proto = if std::net::Ipv4Addr::from_str(&addr.host).is_ok() {
         "ip4"
+    } else if std::net::Ipv6Addr::from_str(&addr.host).is_ok() {
+        "ip6"
     } else {
-        "dns4"
+        "dns"
     };
     let suffix = if addr.secure { "wss" } else { "ws" };
     format!("/{}/{}/tcp/{}/{}", proto, addr.host, addr.port, suffix)
@@ -291,6 +338,14 @@ fn test_relay_address_from_str() {
         "ws://google",
         "wss://google.c:443",
         "ws://google.com/:443",
+        // bracket form requires an IPv6 literal inside
+        "ws://[google.com]:443",
+        "ws://[::1",
+        "ws://[bad-v6]:443",
+        // a port-less bare literal is indistinguishable from a fragment
+        "ws://::1",
+        // bare literal with a JUNK trailing group
+        "ws://::1:99999",
     ];
     for s in invalid_addresses {
         let _ = RelayAddress::from_str(s).expect_err("Expected an error");
@@ -306,20 +361,39 @@ fn test_ws_relay_address_to_multiaddr() {
         network_ports: ports.clone(),
     };
 
-    // `elektron-market.onrender.com:443`: our render.com seed form.
+    // `elektron-market.onrender.com:443`: our render.com seed form. DNS
+    // names resolve DUAL-STACK (`/dns/`, A+AAAA) so IPv6-only peers can
+    // dial the federation edge.
     let seed = RelayAddress::from_str("wss://elektron-market.onrender.com:443").unwrap();
     assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
-               "/dns4/elektron-market.onrender.com/tcp/443/wss");
+               "/dns/elektron-market.onrender.com/tcp/443/wss");
 
     // a local bridge target rides the same mechanics without TLS
     let seed = RelayAddress::from_str("ws://127.0.0.1:10100").unwrap();
     assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
                "/ip4/127.0.0.1/tcp/10100/ws");
 
+    // IPv6 literals: the URI-standard bracket form dials `/ip6/`, with and
+    // without an explicit port. Bare dual-colon literals stay rejected (see
+    // `from_host_port` — the bracket form is the only unambiguous spelling).
+    let seed = RelayAddress::from_str("ws://[::1]:10200").unwrap();
+    assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+               "/ip6/::1/tcp/10200/ws");
+    assert_eq!(seed.to_string(), "ws://[::1]:10200");
+
+    let seed = RelayAddress::from_str("ws://[::1]").unwrap();
+    assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+               "/ip6/::1/tcp/80/ws");
+    assert_eq!(seed.to_string(), "ws://[::1]:80");
+
+    for bare in ["ws://::1:8080", "ws://2001:db8::1", "ws://2001:db8::1:2"] {
+        assert!(RelayAddress::from_str(bare).is_err(), "expected bare '{bare}' rejected");
+    }
+
     // netid-derived ports must NOT leak into the websocket form
     let seed = RelayAddress::from_str("ws://relay.host:10200").unwrap();
     assert_eq!(seed.try_to_multiaddr(distributed).unwrap().to_string(),
-               "/dns4/relay.host/tcp/10200/ws");
+               "/dns/relay.host/tcp/10200/ws");
 
     let seed = RelayAddress::from_str("ws://relay.host:10200").unwrap();
     assert!(seed.try_to_multiaddr(NetworkInfo::InMemory).is_err());
