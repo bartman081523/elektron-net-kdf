@@ -1070,7 +1070,17 @@ fn build_dns_ws_transport(
     )
     .unwrap();
 
-    let transport = dns_tcp.or_transport(ws_dns_tcp);
+    // The websocket branch must come FIRST: OrTransport only falls through
+    // on a *synchronous* MultiaddrNotSupported, but TokioDnsConfig::dial
+    // (dns/src/lib.rs do_dial) always returns Ok(future) and defers the
+    // inner tcp rejection — a /ws|/wss multiaddr dial dies inside the
+    // dns/tcp future with MultiaddrNotSupported and this branch never sees
+    // it. The ws branch rejects non-ws addresses synchronously (framed.rs
+    // parse_ws_dial_addr pops the trailing /ws|/wss), so plain tcp dials
+    // and listens still fall through, and DNS4 resolution for wss dials
+    // keeps working because this branch's inner transport is the DNS
+    // wrapper. Probe: scratches/61clients/ws-dial-probe.
+    let transport = ws_dns_tcp.or_transport(dns_tcp);
     upgrade_transport(transport, noise_keys, max_num_streams)
 }
 
