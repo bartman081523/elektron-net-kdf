@@ -100,10 +100,13 @@ fn relay_upgrade_request(req: &Request<Body>, relay_host: &str) -> Vec<u8> {
 }
 
 /// Read and parse one HTTP response head ("\r\n\r\n" terminated) from the
-/// relay. Returns (status_code, headers). Anything but 101 is rejected by the
-/// caller: the relay plain-ws listener must accept our replayed handshake —
-/// this bridge is not a generic HTTP proxy.
-async fn relay_response_head(stream: &mut TcpStream) -> Result<(u16, HeaderMap), String> {
+/// relay. Returns (status_code, headers, leftover_bytes). Anything but 101 is
+/// rejected by the caller: the relay plain-ws listener must accept our
+/// replayed handshake — this bridge is not a generic HTTP proxy. The read
+/// chunks 512 bytes at a time, so a relay frame coalesced into the same
+/// segment can ride in past the head end; those bytes belong to the client —
+/// callers must forward `leftover` before pumping, never drop them.
+async fn relay_response_head(stream: &mut TcpStream) -> Result<(u16, HeaderMap, Vec<u8>), String> {
     let mut buf = Vec::with_capacity(512);
     let mut chunk = [0u8; 512];
     loop {
@@ -137,7 +140,8 @@ async fn relay_response_head(stream: &mut TcpStream) -> Result<(u16, HeaderMap),
                     headers.append(name, value);
                 }
             }
-            return Ok((code, headers));
+            let leftover = buf[end..].to_vec();
+            return Ok((code, headers, leftover));
         }
     }
 }
@@ -161,7 +165,7 @@ pub(crate) async fn splice(mut req: Request<Body>, bridge_addr: SocketAddr) -> R
     if let Err(e) = relay.write_all(&relay_upgrade_request(&req, &relay_host)).await {
         return bad_gateway(&format!("relay handshake write failed: {}", e));
     }
-    let (code, relay_headers) = match relay_response_head(&mut relay).await {
+    let (code, relay_headers, leftover) = match relay_response_head(&mut relay).await {
         Ok(ok) => ok,
         Err(e) => return bad_gateway(&format!("relay handshake failed: {}", e)),
     };
@@ -180,13 +184,24 @@ pub(crate) async fn splice(mut req: Request<Body>, bridge_addr: SocketAddr) -> R
 
     tokio::spawn(async move {
         match hyper::upgrade::on(&mut req).await {
-            Ok(mut client) => match tokio::io::copy_bidirectional(&mut client, &mut relay).await {
-                Ok((to_relay, to_client)) => println!(
-                    "elek-web: ws bridge -> {} closed ({} bytes to relay, {} bytes to client)",
-                    bridge_addr, to_relay, to_client
-                ),
-                Err(e) => eprintln!("elek-web: ws bridge pump error: {}", e),
-            },
+            Ok(mut client) => {
+                // relay frames that coalesced into the 101 head chunk arrive
+                // BEFORE copy_bidirectional can start mirroring — push them
+                // through first or the client loses the start of the stream.
+                if !leftover.is_empty() {
+                    if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut client, &leftover).await {
+                        eprintln!("elek-web: ws bridge coalesced-forward failed: {}", e);
+                        return;
+                    }
+                }
+                match tokio::io::copy_bidirectional(&mut client, &mut relay).await {
+                    Ok((to_relay, to_client)) => println!(
+                        "elek-web: ws bridge -> {} closed ({} bytes to relay, {} bytes to client)",
+                        bridge_addr, to_relay, to_client
+                    ),
+                    Err(e) => eprintln!("elek-web: ws bridge pump error: {}", e),
+                }
+            }
             Err(e) => eprintln!("elek-web: ws upgrade never completed: {}", e),
         }
     });
