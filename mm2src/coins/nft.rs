@@ -129,11 +129,11 @@ pub async fn get_nft_metadata(ctx: MmArc, req: NftMetadataReq) -> MmResult<Nft, 
         NftListStorageOps::init(&storage, &req.chain).await.map_mm_err()?;
     }
     let mut nft = storage
-        .get_nft(&req.chain, format!("{:#02x}", req.token_address), req.token_id.clone())
+        .get_nft(&req.chain, format!("{:#x}", req.token_address), req.token_id.clone())
         .await
         .map_mm_err()?
         .ok_or_else(|| GetNftInfoError::TokenNotFoundInWallet {
-            token_address: format!("{:#02x}", req.token_address),
+            token_address: format!("{:#x}", req.token_address),
             token_id: req.token_id.to_string(),
         })?;
     if req.protect_from_spam {

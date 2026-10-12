@@ -7,14 +7,13 @@ pub(crate) use smart_fraction_fmt::SmartFractPrecision;
 
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
-use log::{error, info};
+use log::error;
 use mm2_rpc::data::legacy::{
     BalanceResponse, CoinInitResponse, GetEnabledResponse, Mm2RpcResult, MmVersionResponse, OrderbookResponse,
     SellBuyResponse, Status,
 };
 use serde_json::Value as Json;
 use std::cell::RefCell;
-use std::fmt::Debug;
 use std::io::Write;
 
 use super::OrderbookConfig;
@@ -24,7 +23,6 @@ use common::{write_safe::io::WriteSafeIO, write_safe_io, writeln_safe_io};
 
 pub(crate) trait ResponseHandler {
     fn print_response(&self, response: Json) -> Result<()>;
-    fn debug_response<T: Debug + 'static>(&self, response: &T) -> Result<()>;
     fn on_orderbook_response<Cfg: AdexConfig + 'static>(
         &self,
         orderbook: &OrderbookResponse,
@@ -54,11 +52,6 @@ impl ResponseHandler for ResponseHandlerImpl<'_> {
             .iter()
             .map(SimpleCliTable::from_pair)
             .for_each(|value| writeln_safe_io!(self.writer.borrow_mut(), "{}: {:?}", value.key, value.value));
-        Ok(())
-    }
-
-    fn debug_response<T: Debug + 'static>(&self, response: &T) -> Result<()> {
-        info!("{response:?}");
         Ok(())
     }
 
@@ -102,8 +95,7 @@ impl ResponseHandler for ResponseHandlerImpl<'_> {
             let skip = orderbook
                 .asks
                 .len()
-                .checked_sub(orderbook_config.asks_limit.unwrap_or(usize::MAX))
-                .unwrap_or_default();
+                .saturating_sub(orderbook_config.asks_limit.unwrap_or(usize::MAX));
 
             orderbook
                 .asks

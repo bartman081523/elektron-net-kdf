@@ -800,10 +800,8 @@ impl ElectrumClient {
                             Err(e) => return MmError::err(UtxoRpcError::InvalidResponse(format!("{e:?}"))),
                         };
                         let mut block_registry: HashMap<u64, BlockHeader> = HashMap::new();
-                        let mut starting_height = from_height;
-                        for block_header in &block_headers {
+                        for (starting_height, block_header) in (from_height..).zip(block_headers.iter()) {
                             block_registry.insert(starting_height, block_header.clone());
-                            starting_height += 1;
                         }
                         (block_registry, block_headers)
                     };
@@ -846,7 +844,7 @@ impl ElectrumClient {
 
             Err(MmError::new(UtxoRpcError::Internal(format!(
                 "Couldn't get block count from any server for {}, responses: {:?}",
-                &selfi.coin_ticker, erroneous_responses
+                selfi.coin_ticker, erroneous_responses
             ))))
         };
 

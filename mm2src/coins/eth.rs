@@ -1164,7 +1164,7 @@ impl EthCoinImpl {
         // EVM-only path function - uses Evm formatting explicitly
         ctx.address_dir(&ChainFamily::Evm.format(my_address))
             .join("TRANSACTIONS")
-            .join(format!("{}_{:#02x}_trace.json", self.ticker, my_address))
+            .join(format!("{}_{:#x}_trace.json", self.ticker, my_address))
     }
 
     /// Load saved ETH traces from local DB
@@ -1206,7 +1206,7 @@ impl EthCoinImpl {
         // EVM-only path function - uses Evm formatting explicitly
         ctx.address_dir(&ChainFamily::Evm.format(my_address))
             .join("TRANSACTIONS")
-            .join(format!("{}_{:#02x}_events.json", self.ticker, my_address))
+            .join(format!("{}_{:#x}_events.json", self.ticker, my_address))
     }
 
     /// Store ERC20 events to local DB
@@ -3010,7 +3010,7 @@ impl MarketCoinOps for EthCoin {
             | EthPrivKeyPolicy::HDWallet {
                 activated_key: ref key_pair,
                 ..
-            } => Ok(format!("{:#02x}", key_pair.secret())),
+            } => Ok(format!("{:#x}", key_pair.secret())),
             EthPrivKeyPolicy::Trezor => ERR!("'display_priv_key' is not supported for Hardware Wallets"),
             #[cfg(target_arch = "wasm32")]
             EthPrivKeyPolicy::Metamask(_) => ERR!("'display_priv_key' is not supported for MetaMask"),
@@ -3316,7 +3316,7 @@ impl RpcCommonOps for EthCoin {
                     return Ok(client);
                 },
                 Ok(Err(rpc_error)) => {
-                    debug!("Could not get client version on: {:?}. Error: {}", &client, rpc_error);
+                    debug!("Could not get client version on: {:?}. Error: {}", client, rpc_error);
 
                     if let Web3Transport::Websocket(socket_transport) = client.as_ref().transport() {
                         socket_transport.stop_connection_loop().await;
@@ -3325,7 +3325,7 @@ impl RpcCommonOps for EthCoin {
                 Err(timeout_error) => {
                     debug!(
                         "Client version timeout exceed on: {:?}. Error: {}",
-                        &client, timeout_error
+                        client, timeout_error
                     );
 
                     if let Web3Transport::Websocket(socket_transport) = client.as_ref().transport() {
@@ -3642,7 +3642,7 @@ impl EthCoin {
 
                 self.store_eth_traces(ctx, my_address, &saved_traces);
             }
-            saved_traces.traces.sort_by(|a, b| b.block_number.cmp(&a.block_number));
+            saved_traces.traces.sort_by_key(|a| std::cmp::Reverse(a.block_number));
             for trace in saved_traces.traces {
                 let hash = sha256(&json::to_vec(&trace).unwrap());
                 let internal_id = BytesJson::from(hash.to_vec());
@@ -4007,7 +4007,7 @@ impl EthCoin {
                 .map(|e| (e.transaction_hash.unwrap(), e))
                 .collect();
             let mut all_events: Vec<_> = all_events.into_values().collect();
-            all_events.sort_by(|a, b| b.block_number.unwrap().cmp(&a.block_number.unwrap()));
+            all_events.sort_by_key(|a| std::cmp::Reverse(a.block_number.unwrap()));
 
             for event in all_events {
                 let mut existing_history = match self.load_history_from_file(ctx).compat().await {
@@ -5323,7 +5323,7 @@ impl EthCoin {
                 },
                 EthCoinType::Nft { .. } => MmError::err(Web3RpcError::ProtocolNotSupported(format!(
                     "{} protocol is not supported by allowance",
-                    &coin.coin_type
+                    coin.coin_type
                 ))),
             }
         };

@@ -364,7 +364,7 @@ fn test_ws_relay_address_to_multiaddr() {
 
     let ports = NetworkPorts { tcp: 43331, wss: 43341 };
     let distributed = NetworkInfo::Distributed {
-        network_ports: ports.clone(),
+        network_ports: ports,
     };
 
     // `elektron-market.onrender.com:443`: our render.com seed form. DNS
@@ -372,14 +372,14 @@ fn test_ws_relay_address_to_multiaddr() {
     // dial the federation edge.
     let seed = RelayAddress::from_str("wss://elektron-market.onrender.com:443").unwrap();
     assert_eq!(
-        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        seed.try_to_multiaddr(distributed).unwrap().to_string(),
         "/dns/elektron-market.onrender.com/tcp/443/wss"
     );
 
     // a local bridge target rides the same mechanics without TLS
     let seed = RelayAddress::from_str("ws://127.0.0.1:10100").unwrap();
     assert_eq!(
-        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        seed.try_to_multiaddr(distributed).unwrap().to_string(),
         "/ip4/127.0.0.1/tcp/10100/ws"
     );
 
@@ -388,14 +388,14 @@ fn test_ws_relay_address_to_multiaddr() {
     // `from_host_port` — the bracket form is the only unambiguous spelling).
     let seed = RelayAddress::from_str("ws://[::1]:10200").unwrap();
     assert_eq!(
-        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        seed.try_to_multiaddr(distributed).unwrap().to_string(),
         "/ip6/::1/tcp/10200/ws"
     );
     assert_eq!(seed.to_string(), "ws://[::1]:10200");
 
     let seed = RelayAddress::from_str("ws://[::1]").unwrap();
     assert_eq!(
-        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        seed.try_to_multiaddr(distributed).unwrap().to_string(),
         "/ip6/::1/tcp/80/ws"
     );
     assert_eq!(seed.to_string(), "ws://[::1]:80");

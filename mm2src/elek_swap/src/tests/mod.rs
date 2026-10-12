@@ -21,7 +21,7 @@ async fn test_get_version() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7784");
-    let args = vec!["elek-swap", "version"];
+    let args = ["elek-swap", "version"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();
@@ -42,7 +42,7 @@ async fn test_get_orderbook() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7785");
-    let args = vec!["elek-swap", "orderbook", "RICK", "MORTY"];
+    let args = ["elek-swap", "orderbook", "RICK", "MORTY"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();
@@ -60,7 +60,7 @@ async fn test_get_orderbook_with_uuids() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7786");
-    let args = vec!["elek-swap", "orderbook", "RICK", "MORTY", "--uuids"];
+    let args = ["elek-swap", "orderbook", "RICK", "MORTY", "--uuids"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();
@@ -78,7 +78,7 @@ async fn test_get_orderbook_with_publics() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7787");
-    let args = vec!["elek-swap", "orderbook", "RICK", "MORTY", "--publics"];
+    let args = ["elek-swap", "orderbook", "RICK", "MORTY", "--publics"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();
@@ -96,7 +96,7 @@ async fn test_get_enabled() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7788");
-    let args = vec!["elek-swap", "get-enabled"];
+    let args = ["elek-swap", "get-enabled"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();
@@ -114,7 +114,7 @@ async fn test_get_balance() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7789");
-    let args = vec!["elek-swap", "balance", "RICK"];
+    let args = ["elek-swap", "balance", "RICK"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();
@@ -133,7 +133,7 @@ async fn test_enable() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7790");
-    let args = vec!["elek-swap", "enable", "ETH"];
+    let args = ["elek-swap", "enable", "ETH"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();
@@ -173,7 +173,7 @@ async fn test_buy_morty_for_rick() {
         writer: (&mut buffer as &mut dyn Write).into(),
     };
     let config = AdexConfigImpl::new("dummy", "http://127.0.0.1:7791");
-    let args = vec!["elek-swap", "buy", "MORTY", "RICK", "0.01", "0.5"];
+    let args = ["elek-swap", "buy", "MORTY", "RICK", "0.01", "0.5"];
     Cli::execute(args.iter().map(|arg| arg.to_string()), &config, &response_handler)
         .await
         .unwrap();

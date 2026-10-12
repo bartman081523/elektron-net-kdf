@@ -476,15 +476,13 @@ where
                         },
                     }
                 },
-                BCH_COIN_PROTOCOL_TYPE | BCH_TOKEN_PROTOCOL_TYPE => {
+                BCH_COIN_PROTOCOL_TYPE | BCH_TOKEN_PROTOCOL_TYPE if details.coin != request.coin => {
                     // SLP tokens are part of BCH transactions and SLP transactions might be stored with the BCH ticker.
                     // Ideally, we should avoid this workaround and instead fix the incorrect ticker logic when inserting
                     // transactions with the wrong ticker.
                     //
                     // Original PR: https://github.com/KomodoPlatform/komodo-defi-framework/pull/1175.
-                    if details.coin != request.coin {
-                        details.coin = request.coin.clone();
-                    }
+                    details.coin = request.coin.clone();
                 },
                 _ => {},
             };

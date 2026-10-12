@@ -383,7 +383,7 @@ impl ZCoin {
     async fn wallet_notes_ordered(&self) -> Result<Vec<SpendableNote>, MmError<SpendableNotesError>> {
         let mut unspents = self.get_wallet_notes().await?;
 
-        unspents.sort_unstable_by(|a, b| a.note_value.cmp(&b.note_value));
+        unspents.sort_unstable_by_key(|a| a.note_value);
         Ok(unspents)
     }
 
@@ -688,8 +688,8 @@ impl ZCoin {
             .map_mm_err()?;
 
         let prev_tx_hashes: HashSet<_> = transactions
-            .iter()
-            .flat_map(|(_, tx)| {
+            .values()
+            .flat_map(|tx| {
                 tx.vin.iter().map(|vin| {
                     let mut hash = *vin.prevout.hash();
                     hash.reverse();

@@ -345,7 +345,7 @@ impl State for WaitForTakerPaymentSpend {
                 Ok(None) => {
                     debug!(
                         "Spend or refund for taker payment tx {:?} was not found",
-                        &self.taker_payment_hex
+                        self.taker_payment_hex
                     );
                     Timer::sleep(payment_search_interval).await;
                     continue;

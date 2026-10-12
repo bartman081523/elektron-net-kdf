@@ -31,11 +31,11 @@ where
     }
 }
 
-impl<T: ToString> ToString for InquireOption<T> {
-    fn to_string(&self) -> String {
+impl<T: std::fmt::Display> std::fmt::Display for InquireOption<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InquireOption::Some(value) => value.to_string(),
-            InquireOption::None => "None".to_string(),
+            InquireOption::Some(value) => write!(f, "{value}"),
+            InquireOption::None => f.write_str("None"),
         }
     }
 }

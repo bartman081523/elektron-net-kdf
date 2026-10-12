@@ -212,6 +212,10 @@ impl ApiClient {
         ]
     }
 
+    // Drift (upstream, clippy 1.99): the largest `ApiClientError` variant
+    // exceeds the 144-byte result_large_err threshold; boxing the error
+    // would reshape the client's api surface, so allow it at this site.
+    #[allow(clippy::result_large_err)]
     pub async fn call_api<T>(api_url: Url) -> MmResult<T, ApiClientError>
     where
         T: DeserializeOwned,

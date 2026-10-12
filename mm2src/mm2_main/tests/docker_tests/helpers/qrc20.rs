@@ -218,7 +218,7 @@ pub fn qrc20_coin_conf_item(ticker: &str) -> Json {
         "QORTY" => qorty_token_address(),
         _ => panic!("Expected either QICK or QORTY ticker, found {}", ticker),
     };
-    let contract_address = format!("{contract_address:#02x}");
+    let contract_address = format!("{contract_address:#x}");
 
     let confpath = qtum_conf_path();
     json!({

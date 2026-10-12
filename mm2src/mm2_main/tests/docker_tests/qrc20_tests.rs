@@ -783,7 +783,7 @@ fn test_check_balance_on_order_post_base_coin_locked() {
     fill_address(&coin, &my_address, 10.into(), timeout);
 
     let confpath = qtum_conf_path();
-    let qick_contract_address = format!("{:#02x}", qick_token_address());
+    let qick_contract_address = format!("{:#x}", qick_token_address());
     let coins = json!([
         {"coin":"MYCOIN","asset":"MYCOIN","required_confirmations":0,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
         {"coin":"QICK","required_confirmations":1,"pubtype": 120,"p2shtype": 50,"wiftype": 128,"mm2": 1,"mature_confirmations": 500,"confpath": confpath,"network":"regtest",
@@ -1063,7 +1063,7 @@ fn test_trade_preimage_not_sufficient_base_coin_balance_for_ticker() {
     let qtum_balance = MmNumber::from("0.005").to_decimal();
     let (_, _, priv_key) = generate_qrc20_coin_with_random_privkey("QICK", qtum_balance.clone(), qick_balance);
 
-    let qick_contract_address = format!("{:#02x}", qick_token_address());
+    let qick_contract_address = format!("{:#x}", qick_token_address());
     let confpath = qtum_conf_path();
     let coins = json! ([
         {"coin":"MYCOIN","asset":"MYCOIN","txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},

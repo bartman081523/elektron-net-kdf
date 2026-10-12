@@ -91,7 +91,7 @@ pub fn addr_from_raw_pubkey(pubkey: &[u8]) -> Result<Address, String> {
 pub fn addr_from_pubkey_str(pubkey: &str) -> Result<String, String> {
     let pubkey_bytes = try_s!(hex::decode(pubkey));
     let addr = try_s!(addr_from_raw_pubkey(&pubkey_bytes));
-    Ok(format!("{addr:#02x}"))
+    Ok(format!("{addr:#x}"))
 }
 
 pub(crate) fn display_u256_with_decimal_point(number: U256, decimals: u8) -> String {

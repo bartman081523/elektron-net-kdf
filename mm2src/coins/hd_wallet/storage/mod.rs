@@ -413,7 +413,7 @@ mod tests {
             .load_all_accounts()
             .await
             .expect("HDWalletCoinStorage::load_all_accounts: RICK device=0");
-        actual.sort_by(|x, y| x.account_id.cmp(&y.account_id));
+        actual.sort_by_key(|x| x.account_id);
         assert_eq!(actual, vec![rick_device0_account0, rick_device0_account1]);
 
         let actual = rick_device1_db

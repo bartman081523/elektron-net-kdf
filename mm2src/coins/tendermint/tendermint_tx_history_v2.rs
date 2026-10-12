@@ -841,7 +841,7 @@ where
                     let fee_data = match deserialized_tx.auth_info.fee.amount.first() {
                         Some(data) => data,
                         None => {
-                            log::debug!("Could not read transaction fee for tx '{}', skipping it", &tx_hash);
+                            log::debug!("Could not read transaction fee for tx '{}', skipping it", tx_hash);
                             continue;
                         },
                     };
@@ -853,7 +853,7 @@ where
                     if transfer_details_list.is_empty() {
                         log::debug!(
                             "Could not find transfer details in events for tx '{}', skipping it",
-                            &tx_hash
+                            tx_hash
                         );
                         continue;
                     }
@@ -913,7 +913,7 @@ where
                             .get_tx_from_history(&coin.history_wallet_id(), &internal_id)
                             .await
                         {
-                            log::debug!("Tx '{}' already exists in tx_history. Skipping it.", &tx_hash);
+                            log::debug!("Tx '{}' already exists in tx_history. Skipping it.", tx_hash);
                             continue;
                         }
 

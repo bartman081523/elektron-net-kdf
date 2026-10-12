@@ -352,7 +352,7 @@ impl BchCoin {
             bch_unspents.standard,
         );
 
-        slp_unspents.sort_by(|a, b| a.slp_amount.cmp(&b.slp_amount));
+        slp_unspents.sort_by_key(|a| a.slp_amount);
         Ok((slp_unspents, standard_utxos, recently_spent))
     }
 
@@ -372,7 +372,7 @@ impl BchCoin {
             bch_unspents.standard,
         );
 
-        slp_unspents.sort_by(|a, b| a.slp_amount.cmp(&b.slp_amount));
+        slp_unspents.sort_by_key(|a| a.slp_amount);
         Ok((slp_unspents, standard_utxos))
     }
 

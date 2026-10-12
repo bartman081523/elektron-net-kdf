@@ -175,8 +175,8 @@ impl Qrc20Coin {
 
             // `history_map` has been updated.
             let to_write: Vec<TransactionDetails> = history_map
-                .iter()
-                .flat_map(|(_, value)| value)
+                .values()
+                .flatten()
                 .map(|(_tx_id, tx)| tx.clone())
                 .collect();
             if let Err(e) = self.save_history_to_file(&ctx, to_write).compat().await {
@@ -218,7 +218,7 @@ impl Qrc20Coin {
                 self.transfer_details_from_receipt(&qtum_tx, &qtum_details, receipt, miner_fee.clone())
                     .await
             );
-            details.extend(log_details.into_iter())
+            details.extend(log_details)
         }
 
         Ok(details)
@@ -394,8 +394,8 @@ impl Qrc20Coin {
         actual_balance: &CoinBalance,
     ) -> bool {
         let need_update = history
-            .iter()
-            .flat_map(|(_, txs)| txs)
+            .values()
+            .flatten()
             .any(|(_, tx)| tx.should_update_timestamp() || tx.should_update_block_height());
         match last_balance {
             Some(last_balance) if last_balance == actual_balance && !need_update => {
@@ -687,7 +687,7 @@ impl BuildTransferHistory for ElectrumClient {
             let mut tx_receipts = self.blockchain_transaction_get_receipt(&tx_hash).compat().await?;
             // remove receipts of contract calls didn't emit at least one `Transfer` event
             tx_receipts.retain(|receipt| receipt.log.iter().any(is_transfer_event_log));
-            receipts.extend(tx_receipts.into_iter());
+            receipts.extend(tx_receipts);
         }
 
         Ok(receipts)
@@ -747,7 +747,7 @@ impl BuildTransferHistory for NativeClient {
             // remove receipts of transaction that didn't emit at least one `Transfer` event
             receipts.retain(|receipt| receipt.log.iter().any(is_transfer_event_log));
 
-            result.extend(receipts.into_iter());
+            result.extend(receipts);
             from_block += SEARCH_LOGS_STEP;
         }
         Ok(result)

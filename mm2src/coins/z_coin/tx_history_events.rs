@@ -112,8 +112,8 @@ async fn get_tx_details(coin: &ZCoin, txs: Vec<WalletTx<Nullifier>>) -> Result<V
     let transactions = coin.z_transactions_from_cache_or_rpc(hashes_for_verbose).await?;
 
     let prev_tx_hashes = transactions
-        .iter()
-        .flat_map(|(_, tx)| {
+        .values()
+        .flat_map(|tx| {
             tx.vin.iter().map(|vin| {
                 let mut hash = *vin.prevout.hash();
                 hash.reverse();

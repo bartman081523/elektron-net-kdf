@@ -32,6 +32,11 @@
     unused_assignments
 )]
 #![allow(uncommon_codepoints)]
+// Upstream drift (clippy 1.99): `result_large_err` fires at ~143 result sites in this crate —
+// the largest `Err` variant, `TxRecoverable(TransactionEnum, String)` (lp_coins.rs TransactionErr),
+// is >=456 bytes by type design. Boxing it would reshape the whole coins error surface, so allow
+// it crate-wide instead.
+#![allow(clippy::result_large_err)]
 
 #[macro_use]
 extern crate common;

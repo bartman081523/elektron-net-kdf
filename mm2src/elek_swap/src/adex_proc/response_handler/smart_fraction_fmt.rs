@@ -26,8 +26,8 @@ impl SmartFractionFmt {
     }
 }
 
-impl ToString for SmartFractionFmt {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for SmartFractionFmt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let num = self.num.get();
         let fraction = if num == 0.0 {
             0
@@ -45,7 +45,7 @@ impl ToString for SmartFractionFmt {
             }
         };
         let num = (num * 10_f64.powi(fraction)).trunc() / 10_f64.powi(fraction);
-        format!("{0:#.1$}", num, fraction as usize)
+        write!(f, "{0:#.1$}", num, fraction as usize)
     }
 }
 

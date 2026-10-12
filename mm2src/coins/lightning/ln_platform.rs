@@ -535,7 +535,7 @@ impl Platform {
         self.append_spent_registered_output_txs(&mut transactions_to_confirm, client)
             .await;
 
-        transactions_to_confirm.sort_by(|a, b| (a.height, a.index).cmp(&(b.height, b.index)));
+        transactions_to_confirm.sort_by_key(|a| (a.height, a.index));
 
         for confirmed_transaction_info in transactions_to_confirm {
             let best_block_height = self.best_block_height() as i64;

@@ -215,8 +215,8 @@ impl ConnectionManager {
     /// Returns a list of active/maintained connections.
     pub fn get_active_connections(&self) -> Vec<Arc<ElectrumConnection>> {
         self.read_maintained_connections()
-            .iter()
-            .filter_map(|(_id, address)| self.get_connection(address))
+            .values()
+            .filter_map(|address| self.get_connection(address))
             .collect()
     }
 

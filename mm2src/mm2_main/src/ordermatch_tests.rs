@@ -1901,9 +1901,9 @@ fn test_process_get_orderbook_request() {
         ORDERS_NUMBER,
     ));
 
-    pubkey1_orders.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
-    pubkey2_orders.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
-    pubkey3_orders.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
+    pubkey1_orders.sort_unstable_by_key(|x| x.uuid);
+    pubkey2_orders.sort_unstable_by_key(|x| x.uuid);
+    pubkey3_orders.sort_unstable_by_key(|x| x.uuid);
 
     let mut orders_by_pubkeys = HashMap::new();
     orders_by_pubkeys.insert(pubkey1, pubkey1_orders);
@@ -1936,7 +1936,7 @@ fn test_process_get_orderbook_request() {
                 )
             })
             .collect();
-        actual.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
+        actual.sort_unstable_by_key(|x| x.uuid);
         log!("{:?}-{:?}", pubkey, actual.len());
         assert_eq!(actual, *expected);
     }
@@ -2113,9 +2113,9 @@ fn test_request_and_fill_orderbook() {
             })
             .collect();
 
-        in_trie.sort_by(|x, y| x.0.cmp(&y.0));
+        in_trie.sort_by_key(|x| x.0);
         let mut expected = orders;
-        expected.sort_by(|x, y| x.0.cmp(&y.0));
+        expected.sort_by_key(|x| x.0);
         assert_eq!(in_trie, expected);
     }
 }
@@ -2836,8 +2836,8 @@ fn test_process_sync_pubkey_orderbook_state_points_to_not_uptodate_trie_root() {
     let mut expected: Vec<(Uuid, OrderbookP2PItem)> =
         orders.into_iter().map(|order| (order.uuid, order.into())).collect();
     expected.push((new_order.uuid, new_order.into()));
-    full_trie.sort_by(|x, y| x.0.cmp(&y.0));
-    expected.sort_by(|x, y| x.0.cmp(&y.0));
+    full_trie.sort_by_key(|x| x.0);
+    expected.sort_by_key(|x| x.0);
     assert_eq!(full_trie, expected);
 }
 
@@ -2911,7 +2911,7 @@ fn check_if_orderbook_contains_only(ctx: &MmArc, pubkey: &str, orders: &[Orderbo
                     (key, value)
                 })
                 .collect();
-            trie.sort_by(|(uuid_x, _), (uuid_y, _)| uuid_x.cmp(uuid_y));
+            trie.sort_by_key(|(uuid_x, _)| *uuid_x);
             (alb_pair.clone(), trie)
         })
         .collect();
@@ -2923,8 +2923,8 @@ fn check_if_orderbook_contains_only(ctx: &MmArc, pubkey: &str, orders: &[Orderbo
             .or_insert_with(Vec::default);
         trie.push((order.uuid, order.clone()));
     }
-    for (_alb_pair, trie) in expected_trie_orders.iter_mut() {
-        trie.sort_by(|(uuid_x, _), (uuid_y, _)| uuid_x.cmp(uuid_y));
+    for trie in expected_trie_orders.values_mut() {
+        trie.sort_by_key(|(uuid_x, _)| *uuid_x);
     }
     assert_eq!(actual_trie_orders, expected_trie_orders);
 }

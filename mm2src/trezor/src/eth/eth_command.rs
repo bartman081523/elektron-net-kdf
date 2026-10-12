@@ -24,6 +24,10 @@ use std::collections::BTreeMap;
 
 type ChainId = u64;
 type StaticDefinitionBytes = &'static [u8];
+// Drift (upstream, clippy 1.99): `ETH_TOKEN_DEFS` is itself unused in x86
+// builds, so rustc's dead-code pass considers this alias unused as well
+// (its only reference lives inside the lazy_static! body).
+#[allow(dead_code)]
 type StaticAddressBytes = &'static [u8];
 
 // new supported eth networks:

@@ -36,12 +36,12 @@ fn test_taker_saves_the_swap_as_successful_after_restart_panic_at_wait_for_taker
     alice_conf.conf["dbdir"] = mm_alice.folder.join("DB").to_str().unwrap().into();
 
     block_on(mm_alice.wait_for_log(120., |log| log.contains(WATCHER_MESSAGE_SENT_LOG))).unwrap();
-    block_on(mm_bob.wait_for_log(120., |log| log.contains(&format!("[swap uuid={}] Finished", &uuids[0])))).unwrap();
+    block_on(mm_bob.wait_for_log(120., |log| log.contains(&format!("[swap uuid={}] Finished", uuids[0])))).unwrap();
     block_on(mm_watcher.wait_for_log(120., |log| log.contains(MAKER_PAYMENT_SPEND_SENT_LOG))).unwrap();
 
     block_on(mm_alice.stop()).unwrap();
 
-    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", &uuids[0]));
+    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", uuids[0]));
 
     let expected_events = [
         "Started",
@@ -97,12 +97,12 @@ fn test_taker_saves_the_swap_as_successful_after_restart_panic_at_maker_payment_
     alice_conf.conf["dbdir"] = mm_alice.folder.join("DB").to_str().unwrap().into();
 
     block_on(mm_alice.wait_for_log(120., |log| log.contains(WATCHER_MESSAGE_SENT_LOG))).unwrap();
-    block_on(mm_bob.wait_for_log(120., |log| log.contains(&format!("[swap uuid={}] Finished", &uuids[0])))).unwrap();
+    block_on(mm_bob.wait_for_log(120., |log| log.contains(&format!("[swap uuid={}] Finished", uuids[0])))).unwrap();
     block_on(mm_watcher.wait_for_log(120., |log| log.contains(MAKER_PAYMENT_SPEND_SENT_LOG))).unwrap();
 
     block_on(mm_alice.stop()).unwrap();
 
-    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", &uuids[0]));
+    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", uuids[0]));
 
     let expected_events = [
         "Started",
@@ -162,7 +162,7 @@ fn test_taker_saves_the_swap_as_finished_after_restart_taker_payment_refunded_pa
 
     block_on(mm_alice.stop()).unwrap();
 
-    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", &uuids[0]));
+    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", uuids[0]));
 
     let expected_events = [
         "Started",
@@ -224,7 +224,7 @@ fn test_taker_saves_the_swap_as_finished_after_restart_taker_payment_refunded_pa
 
     block_on(mm_alice.stop()).unwrap();
 
-    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", &uuids[0]));
+    let mm_alice = restart_taker_and_wait_until(&alice_conf, &[], &format!("[swap uuid={}] Finished", uuids[0]));
 
     let expected_events = [
         "Started",

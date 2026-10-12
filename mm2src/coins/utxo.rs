@@ -1785,7 +1785,7 @@ pub async fn kmd_rewards_info<T: UtxoCommonOps>(coin: &T) -> Result<Vec<KmdRewar
     let rpc_client = &utxo.rpc_client;
     let mut unspents = try_s!(rpc_client.list_unspent(&my_address, utxo.decimals).compat().await);
     // Reorder from highest to lowest unspent outputs.
-    unspents.sort_unstable_by(|x, y| y.value.cmp(&x.value));
+    unspents.sort_unstable_by_key(|x| std::cmp::Reverse(x.value));
 
     let mut result = Vec::with_capacity(unspents.len());
     for unspent in unspents {

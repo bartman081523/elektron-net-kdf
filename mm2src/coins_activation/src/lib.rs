@@ -1,3 +1,10 @@
+// Upstream drift (clippy 1.99): `result_large_err` fires at 5 result sites returning
+// `MmError<EnablePlatformCoinWithTokensError>` — the error enum embeds large variants
+// (e.g. `UnexpectedPlatformProtocol { protocol: Json }`), so its size is inherent to the
+// API design and boxing it would reshape the coins-activation error surface. Allow it
+// crate-wide instead.
+#![allow(clippy::result_large_err)]
+
 mod bch_with_tokens_activation;
 mod context;
 mod erc20_token_activation;

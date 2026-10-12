@@ -1372,7 +1372,7 @@ mod tests {
 
         let result = block_on(db.get_payments_by_filter(None, paging, limit)).unwrap();
 
-        payments.sort_by(|a, b| b.last_updated.cmp(&a.last_updated));
+        payments.sort_by_key(|a| std::cmp::Reverse(a.last_updated));
         let expected_payments = &payments[..4].to_vec();
         let actual_payments = &result.payments;
 

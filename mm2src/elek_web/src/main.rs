@@ -512,7 +512,8 @@ async fn main() {
         let fx_rates = fx_rates.clone();
         let proxy = proxy.clone();
         let rpc = rpc.clone();
-        let bridge = bridge.clone();
+        // bridge is Option<SocketAddr> = Copy: captured directly (per-call
+        // copy), no clone needed (clippy::clone_on_copy, stable 1.99).
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 let root = root.clone();
@@ -520,7 +521,6 @@ async fn main() {
                 let fx_rates = fx_rates.clone();
                 let proxy = proxy.clone();
                 let rpc = rpc.clone();
-                let bridge = bridge.clone();
                 async move { handle(req, root, auto_config, fx_rates, proxy, rpc, bridge).await }
             }))
         }

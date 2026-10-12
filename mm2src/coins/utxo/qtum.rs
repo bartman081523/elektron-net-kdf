@@ -1365,5 +1365,5 @@ pub fn contract_addr_from_utxo_addr(address: Address) -> MmResult<H160, ScriptHa
 
 pub fn display_as_contract_address(address: Address) -> MmResult<String, ScriptHashTypeNotSupported> {
     let address = qtum::contract_addr_from_utxo_addr(address)?;
-    Ok(format!("{address:#02x}"))
+    Ok(format!("{address:#x}"))
 }

@@ -48,7 +48,7 @@ impl<'a> SiaWithdrawBuilder<'a> {
         total_amount: u128,
     ) -> Result<Vec<SiacoinElement>, MmError<WithdrawError>> {
         // Sort outputs from largest to smallest
-        unspent_outputs.sort_by(|a, b| b.siacoin_output.value.0.cmp(&a.siacoin_output.value.0));
+        unspent_outputs.sort_by_key(|a| std::cmp::Reverse(a.siacoin_output.value.0));
 
         let mut selected = Vec::new();
         let mut selected_amount = 0;

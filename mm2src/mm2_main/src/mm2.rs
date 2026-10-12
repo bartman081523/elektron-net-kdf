@@ -34,6 +34,11 @@
 )]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #![cfg_attr(target_arch = "wasm32", allow(unused_imports))]
+// Upstream drift (clippy 1.99): `result_large_err` fires at 28 result sites returning
+// `MmError<CheckBalanceError>` / `MmError<TradePreimageRpcError>` / `MmError<MaxMakerVolRpcError>`
+// / `MmError<ApiIntegrationRpcError>` — the swap RPC error enums are >=144 bytes by API design.
+// Boxing them would reshape the whole swap error surface, so allow it crate-wide instead.
+#![allow(clippy::result_large_err)]
 
 #[macro_use]
 extern crate common;

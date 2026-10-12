@@ -3296,7 +3296,7 @@ async fn sign_raw_utxo_tx<T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps>(
     // If some previous utxos are not provided in the params load them from the chain
     if !inputs_to_load.is_empty() {
         let loaded_unspents = get_unspents_for_inputs(coin.as_ref(), &inputs_to_load).await?;
-        unspents.extend(loaded_unspents.into_iter());
+        unspents.extend(loaded_unspents);
     }
 
     // TODO: use zeroise for privkey
@@ -4118,7 +4118,7 @@ pub async fn tx_details_by_hash<T: UtxoCommonOps>(
         if from.contains(&my_address) {
             spent_by_me += prev_tx_output.value;
         }
-        from_addresses.extend(from.into_iter());
+        from_addresses.extend(from);
     }
 
     for output in tx.outputs.iter() {
@@ -4127,7 +4127,7 @@ pub async fn tx_details_by_hash<T: UtxoCommonOps>(
         if to.contains(&my_address) {
             received_by_me += output.value;
         }
-        to_addresses.extend(to.into_iter());
+        to_addresses.extend(to);
     }
 
     // TODO uncomment this when `calc_interest_of_tx` works fine
@@ -5166,7 +5166,7 @@ pub async fn get_all_unspent_ordered_map<T: UtxoCommonOps>(
         .compat()
         .await?;
     let recently_spent = coin.as_ref().recently_spent_outpoints.lock().await;
-    for (_address, unspents) in unspents_map.iter_mut() {
+    for unspents in unspents_map.values_mut() {
         let unordered_unspents = recently_spent.replace_spent_outputs_with_cache(unspents.iter().cloned().collect());
         *unspents = sort_dedup_unspents(unordered_unspents);
     }

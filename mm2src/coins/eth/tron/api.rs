@@ -148,10 +148,10 @@ fn tron_error_from_value(v: &Json) -> Option<TronErrorPayload> {
 
     // Format: {"error": {"code": ..., "message": ...}} - JSON-RPC 2.0 errors (for future use)
     if let Some(error_obj) = obj.get("error").and_then(|v| v.as_object()) {
-        let code = error_obj.get("code").map(&value_to_string);
+        let code = error_obj.get("code").map(value_to_string);
         let message = error_obj
             .get("message")
-            .map(&value_to_string)
+            .map(value_to_string)
             .unwrap_or_else(|| "JSON-RPC error".to_string());
         return Some(TronErrorPayload { code, message });
     }
@@ -165,10 +165,10 @@ fn tron_error_from_value(v: &Json) -> Option<TronErrorPayload> {
 
         // Error if: inner result is false, OR inner result is null/missing but has error code
         if inner_result == Some(false) || (inner_result.is_none() && has_error_code) {
-            let code = result_obj.get("code").map(&value_to_string);
+            let code = result_obj.get("code").map(value_to_string);
             let message = result_obj
                 .get("message")
-                .map(&value_to_string)
+                .map(value_to_string)
                 .unwrap_or_else(|| "Transaction failed".to_string());
             return Some(TronErrorPayload { code, message });
         }
@@ -176,10 +176,10 @@ fn tron_error_from_value(v: &Json) -> Option<TronErrorPayload> {
 
     // Format: {"result": false, "code": "...", "message": "..."} - Top-level Return (broadcasttransaction)
     if matches!(obj.get("result").and_then(|v| v.as_bool()), Some(false)) {
-        let code = obj.get("code").map(&value_to_string);
+        let code = obj.get("code").map(value_to_string);
         let message = obj
             .get("message")
-            .map(&value_to_string)
+            .map(value_to_string)
             .unwrap_or_else(|| "TRON API returned result=false".to_string());
         return Some(TronErrorPayload { code, message });
     }

@@ -472,7 +472,7 @@ impl TxHistoryStorage for SqliteTxHistoryStorage {
                 ];
                 sql_transaction.execute(&insert_tx_in_history_sql(&wallet_id)?, params)?;
 
-                let addresses: FilteringAddresses = tx.from.into_iter().chain(tx.to.into_iter()).collect();
+                let addresses: FilteringAddresses = tx.from.into_iter().chain(tx.to).collect();
                 for address in addresses {
                     let params = [internal_id.clone(), address];
                     sql_transaction.execute(&insert_tx_address_sql(&wallet_id)?, params)?;

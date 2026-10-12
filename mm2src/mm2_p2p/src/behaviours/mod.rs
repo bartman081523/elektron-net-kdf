@@ -383,10 +383,10 @@ mod tests {
                 },
             ),
         ];
-        expected.sort_by(|x, y| x.0.cmp(&y.0));
+        expected.sort_by_key(|x| x.0);
 
         let mut responses = response_rx.await.unwrap();
-        responses.sort_by(|x, y| x.0.cmp(&y.0));
+        responses.sort_by_key(|x| x.0);
         assert_eq!(responses, expected);
     }
 
