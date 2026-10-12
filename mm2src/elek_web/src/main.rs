@@ -30,6 +30,15 @@
 //! native kdf node dialing its seed as wss://<domain>/ through the render.com
 //! HTTPS route) are spliced byte-wise to the relay instead of being routed as
 //! ordinary HTTP.
+//!
+//! API-only mode (render.com directive 2026-10-12: "ohne website, nur api"):
+//! when MM_WEB_API_ONLY is set, SPA files and the CONFIG_PATH handoff are NOT
+//! served (404) — the server is a pure market API: /healthz, /fx/rates.json,
+//! POST /rpc plus GET /rpc/event-stream, and the websocket bridge. The proxied
+//! RPC is additionally allowlisted to read-only market-data methods, so an
+//! anonymous visitor can never reach wallet/lifecycle RPCs of the market
+//! daemon (no-custody hard gate: without it the injected rpc_pass would hand
+//! every visitor a full, funded-pass-aware RPC surface).
 
 mod bridge;
 
@@ -145,6 +154,12 @@ fn config_response(rpc_url: &str, rpc_pass: &str, is_head: bool) -> Response<Bod
 const RPC_PATH: &str = "/rpc";
 const RPC_PATH_SSE: &str = "/rpc/event-stream";
 
+/// API-only mode: the anonymous proxy surface stays read-only market data.
+/// Anything else (wallet, lifecycle, secrets — enable, stop, setprice,
+/// export_keys, …) is refused: the market daemon holds no funds and must not
+/// hand a full rpc_pass-aware RPC surface to the public internet.
+const API_ONLY_RPC_ALLOWLIST: [&str; 3] = ["version", "orderbook", "get_enabled_coins"];
+
 /// Container/deploy-mode proxy target. The SPA talks to THIS server only (same
 /// origin); JSON-RPC POSTs and the SSE stream are proxied to ONE local daemon
 /// and the rpc password is injected server-side, so no browser ever holds it.
@@ -167,6 +182,12 @@ fn bad_gateway(msg: &str) -> Response<Body> {
 fn bad_request(msg: &str) -> Response<Body> {
     let mut resp = Response::new(Body::from(format!("bad request: {}\n", msg)));
     *resp.status_mut() = StatusCode::BAD_REQUEST;
+    resp
+}
+
+fn forbidden(msg: &str) -> Response<Body> {
+    let mut resp = Response::new(Body::from(format!("forbidden: {}\n", msg)));
+    *resp.status_mut() = StatusCode::FORBIDDEN;
     resp
 }
 
@@ -205,7 +226,9 @@ fn config_proxy_response(is_head: bool) -> Response<Body> {
 /// JSON-RPC POST through the proxy: parse the body, force `userpass` to the
 /// real daemon password (whatever the browser sent is overwritten), forward to
 /// the kdf root. Status and content-type pass through unchanged.
-async fn proxy_rpc(rpc: &Client<HttpConnector>, proxy: &Proxy, req: Request<Body>) -> Response<Body> {
+/// In API-only mode the anonymous surface is allowlisted (see
+/// API_ONLY_RPC_ALLOWLIST) before anything is forwarded.
+async fn proxy_rpc(rpc: &Client<HttpConnector>, proxy: &Proxy, req: Request<Body>, api_only: bool) -> Response<Body> {
     let bytes = match body_to_bytes(req.into_body()).await {
         Ok(b) => b,
         Err(_) => return bad_request("unreadable body"),
@@ -216,6 +239,12 @@ async fn proxy_rpc(rpc: &Client<HttpConnector>, proxy: &Proxy, req: Request<Body
     };
     match val.as_object_mut() {
         Some(obj) => {
+            if api_only {
+                let method = obj.get("method").and_then(|m| m.as_str()).unwrap_or("");
+                if !API_ONLY_RPC_ALLOWLIST.contains(&method) {
+                    return forbidden(&format!("method {:?} is not part of the anonymous market API", method));
+                }
+            }
             obj.insert("userpass".to_string(), serde_json::Value::from(proxy.pass.as_str()));
         },
         None => return bad_request("body must be a JSON object"),
@@ -346,12 +375,13 @@ async fn send_file(path: PathBuf, is_head: bool) -> Response<Body> {
 
 async fn handle(
     req: Request<Body>,
-    root: PathBuf,
+    root: Option<PathBuf>,
     auto_config: Option<(String, String)>,
     fx_rates: Option<PathBuf>,
     proxy: Option<Proxy>,
     rpc: Client<HttpConnector>,
     bridge: Option<SocketAddr>,
+    api_only: bool,
 ) -> Result<Response<Body>, Infallible> {
     // P2P splice bridge takes absolute precedence over routing: a websocket
     // upgrade is never an ordinary HTTP resource (see bridge.rs). Everything
@@ -367,12 +397,18 @@ async fn handle(
     let mut resp = match *req.method() {
         Method::GET | Method::HEAD => {
             if path == CONFIG_PATH {
-                match &proxy {
-                    Some(_) => config_proxy_response(is_head),
-                    None => match &auto_config {
-                        Some((rpc_url, rpc_pass)) => config_response(rpc_url, rpc_pass, is_head),
-                        None => not_found(),
-                    },
+                // API-only: the handoff belongs to the SPA, which is not
+                // served here — keep the API surface free of SPA baggage.
+                if api_only {
+                    not_found()
+                } else {
+                    match &proxy {
+                        Some(_) => config_proxy_response(is_head),
+                        None => match &auto_config {
+                            Some((rpc_url, rpc_pass)) => config_response(rpc_url, rpc_pass, is_head),
+                            None => not_found(),
+                        },
+                    }
                 }
             } else if path == "/healthz" {
                 match &proxy {
@@ -395,14 +431,18 @@ async fn handle(
                     None => not_found(),
                 }
             } else {
-                match resolve(&root, &path) {
-                    Some(file) => send_file(file, is_head).await,
+                // API-only: root is None, every non-API GET is a 404.
+                match &root {
+                    Some(root) => match resolve(root, &path) {
+                        Some(file) => send_file(file, is_head).await,
+                        None => not_found(),
+                    },
                     None => not_found(),
                 }
             }
         },
         Method::POST => match (&proxy, path.as_str()) {
-            (Some(p), RPC_PATH) | (Some(p), "/rpc/") => proxy_rpc(&rpc, p, req).await,
+            (Some(p), RPC_PATH) | (Some(p), "/rpc/") => proxy_rpc(&rpc, p, req, api_only).await,
             _ => not_allowed(),
         },
         _ => not_allowed(),
@@ -417,15 +457,26 @@ async fn handle(
 
 #[tokio::main]
 async fn main() {
+    let api_only = match env::var("MM_WEB_API_ONLY") {
+        Ok(v) => matches!(v.trim(), "1" | "true" | "TRUE" | "True"),
+        Err(_) => false,
+    };
     let root_arg = env::var("MM_WEB_ROOT").unwrap_or_else(|_| DEFAULT_ROOT.to_string());
     let addr_arg = env::var("MM_WEB_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let addr: SocketAddr = addr_arg
         .parse()
         .unwrap_or_else(|_| panic!("MM_WEB_ADDR must parse as ip:port, got {:?}", addr_arg));
-    let root = PathBuf::from(&root_arg);
-    let root_canonical = root
-        .canonicalize()
-        .unwrap_or_else(|e| panic!("MM_WEB_ROOT {:?} does not exist: {}", root_arg, e));
+    // API-only deployments have no SPA root at all: static routing is removed
+    // wholesale (404), so MM_WEB_ROOT is neither required nor used.
+    let root: Option<PathBuf> = if api_only {
+        None
+    } else {
+        let root = PathBuf::from(&root_arg);
+        Some(
+            root.canonicalize()
+                .unwrap_or_else(|e| panic!("MM_WEB_ROOT {:?} does not exist: {}", root_arg, e)),
+        )
+    };
     // Auto-connect handoff: only complete pairs enable the endpoint. The value
     // handed over is read at startup, so MM_WEB_RPC_URL is normalized here
     // (no trailing slashes; the SPA's probe() POSTs to the bare root).
@@ -492,22 +543,33 @@ async fn main() {
     match &proxy {
         Some(p) => println!(
             "elek-web: serving {} on http://{} (rpc POSTs proxied to {})",
-            root_canonical.display(),
+            root.as_ref()
+                .map(|r| r.display().to_string())
+                .unwrap_or_else(|| "API-only (no SPA)".to_string()),
             addr,
             p.upstream
         ),
         None => println!(
             "elek-web: serving {} on http://{} (SPA talks to the kdf daemon directly)",
-            root_canonical.display(),
+            root.as_ref()
+                .map(|r| r.display().to_string())
+                .unwrap_or_else(|| "API-only (no SPA)".to_string()),
             addr
         ),
     }
-    print_auto_config_banner(&auto_config, &proxy);
+    if api_only {
+        println!(
+            "elek-web: MM_WEB_API_ONLY -> API-only (no SPA files, no {} handoff; /rpc allowlist {:?})",
+            CONFIG_PATH, API_ONLY_RPC_ALLOWLIST
+        );
+    } else {
+        print_auto_config_banner(&auto_config, &proxy);
+    }
     print_fx_banner(&fx_rates);
     print_bridge_banner(&bridge);
 
     let make_svc = make_service_fn(|_conn| {
-        let root = root_canonical.clone();
+        let root = root.clone();
         let auto_config = auto_config.clone();
         let fx_rates = fx_rates.clone();
         let proxy = proxy.clone();
@@ -521,7 +583,7 @@ async fn main() {
                 let fx_rates = fx_rates.clone();
                 let proxy = proxy.clone();
                 let rpc = rpc.clone();
-                async move { handle(req, root, auto_config, fx_rates, proxy, rpc, bridge).await }
+                async move { handle(req, root, auto_config, fx_rates, proxy, rpc, bridge, api_only).await }
             }))
         }
     });
