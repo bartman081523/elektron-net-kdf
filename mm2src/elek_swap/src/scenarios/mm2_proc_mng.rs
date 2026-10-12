@@ -356,8 +356,7 @@ pub(crate) fn get_status() {
 
     if let Some(found) = String::from_utf8_lossy(&output.stdout)
         .lines()
-        .filter(|line| line.contains("PID"))
-        .next_back()
+        .rfind(|line| line.contains("PID"))
     {
         let chars = found.trim();
 

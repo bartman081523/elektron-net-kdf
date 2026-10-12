@@ -165,7 +165,7 @@ impl IndexedDbBuilder {
         let fut = async move {
             let db = match IdbDatabaseBuilder::new(&self.db_name)
                 .with_version(self.db_version)
-                .with_tables(self.tables.into_iter())
+                .with_tables(self.tables)
                 .build()
                 .await
             {
