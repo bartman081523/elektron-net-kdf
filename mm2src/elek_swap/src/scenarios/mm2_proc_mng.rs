@@ -300,7 +300,7 @@ fn get_plist_path() -> Result<PathBuf> {
             "Failed to get current_dir to construct plist_path: {error}"
         )),
         Ok(mut current_dir) => {
-            current_dir.push(&format!("{LAUNCHCTL_MM2_ID}.plist"));
+            current_dir.push(format!("{LAUNCHCTL_MM2_ID}.plist"));
             Ok(current_dir)
         },
     }
@@ -357,7 +357,7 @@ pub(crate) fn get_status() {
     if let Some(found) = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| line.contains("PID"))
-        .last()
+        .next_back()
     {
         let chars = found.trim();
 

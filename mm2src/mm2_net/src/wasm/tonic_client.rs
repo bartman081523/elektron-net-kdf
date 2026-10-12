@@ -39,7 +39,7 @@ impl Service<Request<BoxBody>> for TonicClient {
 }
 
 async fn call(base_url: String, request: Request<BoxBody>) -> MmResult<Response<ResponseBody>, PostGrpcWebErr> {
-    let base_url = format!("{base_url}{}", request.uri().to_string());
+    let base_url = format!("{base_url}{}", request.uri());
     let body = request
         .into_body()
         .data()
