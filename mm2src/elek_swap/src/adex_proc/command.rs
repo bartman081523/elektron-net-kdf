@@ -36,7 +36,9 @@ impl<T> Command<T>
 where
     T: Serialize + Sized,
 {
-    pub(super) fn builder() -> CommandBuilder<T> { CommandBuilder::new() }
+    pub(super) fn builder() -> CommandBuilder<T> {
+        CommandBuilder::new()
+    }
 }
 
 pub(super) struct CommandBuilder<T> {

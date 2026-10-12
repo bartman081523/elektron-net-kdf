@@ -15,14 +15,16 @@ mod reexport {
     pub(super) use std::mem::size_of;
     pub(super) use std::ptr::null;
     pub(super) use std::u32;
-    pub(super) use winapi::um::processthreadsapi::{CreateProcessA, OpenProcess, TerminateProcess, PROCESS_INFORMATION,
-                                                   STARTUPINFOA};
+    pub(super) use winapi::um::processthreadsapi::{
+        CreateProcessA, OpenProcess, TerminateProcess, PROCESS_INFORMATION, STARTUPINFOA,
+    };
     pub(super) use winapi::um::winnt::{PROCESS_TERMINATE, SYNCHRONIZE};
 
     pub(super) const MM2_BINARY: &str = "kdf.exe";
 }
 
-#[cfg(windows)] use reexport::*;
+#[cfg(windows)]
+use reexport::*;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod unix_not_macos_reexport {
@@ -39,7 +41,8 @@ mod unix_reexport {
     pub(super) const MM2_BINARY: &str = "kdf";
 }
 
-#[cfg(unix)] use unix_reexport::*;
+#[cfg(unix)]
+use unix_reexport::*;
 
 #[cfg(target_os = "macos")]
 mod macos_reexport {
@@ -52,7 +55,8 @@ mod macos_reexport {
     pub(super) const LAUNCHCTL_MM2_ID: &str = "com.komodoproject.mm2";
 }
 
-#[cfg(target_os = "macos")] use macos_reexport::*;
+#[cfg(target_os = "macos")]
+use macos_reexport::*;
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn get_status() {
@@ -98,7 +102,9 @@ pub(crate) fn start_process(mm2_cfg_file: &Option<String>, coins_file: &Option<S
         env::set_var("MM_LOG", log_file);
     }
 
-    let Ok(mm2_binary) = get_mm2_binary_path() else { return; };
+    let Ok(mm2_binary) = get_mm2_binary_path() else {
+        return;
+    };
     if !mm2_binary.exists() {
         error!("Failed to start mm2, no file: {mm2_binary:?}");
         return;
@@ -200,14 +206,18 @@ pub(crate) fn stop_process() {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn start_process(mm2_cfg_file: &Option<String>, coins_file: &Option<String>, log_file: &Option<String>) {
-    let Ok(mm2_binary) = get_mm2_binary_path() else { return; };
-
-    let Ok(current_dir) = env::current_dir() else {
-	error!("Failed to get current_dir");
-	return
+    let Ok(mm2_binary) = get_mm2_binary_path() else {
+        return;
     };
 
-    let Ok(plist_path)  = get_plist_path() else {return;};
+    let Ok(current_dir) = env::current_dir() else {
+        error!("Failed to get current_dir");
+        return;
+    };
+
+    let Ok(plist_path) = get_plist_path() else {
+        return;
+    };
     let plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -298,7 +308,9 @@ fn get_plist_path() -> Result<PathBuf> {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn stop_process() {
-    let Ok(plist_path) = get_plist_path() else { return; };
+    let Ok(plist_path) = get_plist_path() else {
+        return;
+    };
     let Ok(uid) = get_proc_uid() else { return };
     if let Err(error) = Command::new("launchctl")
         .arg("bootout")

@@ -26,7 +26,9 @@ const PRICE_PRECISION: SmartFractPrecision = (PRICE_PRECISION_MIN, PRICE_PRECISI
 const CFG_FILE_PERM_MODE: u32 = 0o660;
 
 pub(super) fn get_config() {
-    let Ok(adex_cfg) = AdexConfigImpl::from_config_path() else { return; };
+    let Ok(adex_cfg) = AdexConfigImpl::from_config_path() else {
+        return;
+    };
     info!("{}", adex_cfg)
 }
 
@@ -67,10 +69,18 @@ pub(super) struct AdexConfigImpl {
 }
 
 impl AdexConfig for AdexConfigImpl {
-    fn rpc_password(&self) -> Option<String> { self.rpc_password.clone() }
-    fn rpc_uri(&self) -> Option<String> { self.rpc_uri.clone() }
-    fn orderbook_price_precision(&self) -> &SmartFractPrecision { &PRICE_PRECISION }
-    fn orderbook_volume_precision(&self) -> &SmartFractPrecision { &VOLUME_PRECISION }
+    fn rpc_password(&self) -> Option<String> {
+        self.rpc_password.clone()
+    }
+    fn rpc_uri(&self) -> Option<String> {
+        self.rpc_uri.clone()
+    }
+    fn orderbook_price_precision(&self) -> &SmartFractPrecision {
+        &PRICE_PRECISION
+    }
+    fn orderbook_volume_precision(&self) -> &SmartFractPrecision {
+        &VOLUME_PRECISION
+    }
 }
 
 impl Display for AdexConfigImpl {
@@ -109,7 +119,9 @@ impl AdexConfigImpl {
         Ok(config)
     }
 
-    fn is_set(&self) -> bool { self.rpc_uri.is_some() && self.rpc_password.is_some() }
+    fn is_set(&self) -> bool {
+        self.rpc_uri.is_some() && self.rpc_password.is_some()
+    }
 
     pub(super) fn get_config_dir() -> Result<PathBuf> {
         let project_dirs = ProjectDirs::from(PROJECT_QUALIFIER, PROJECT_COMPANY, PROJECT_APP)
@@ -175,7 +187,11 @@ impl AdexConfigImpl {
         Ok(())
     }
 
-    fn set_rpc_password(&mut self, rpc_password: String) { self.rpc_password.replace(rpc_password); }
+    fn set_rpc_password(&mut self, rpc_password: String) {
+        self.rpc_password.replace(rpc_password);
+    }
 
-    fn set_rpc_uri(&mut self, rpc_uri: String) { self.rpc_uri.replace(rpc_uri); }
+    fn set_rpc_uri(&mut self, rpc_uri: String) {
+        self.rpc_uri.replace(rpc_uri);
+    }
 }

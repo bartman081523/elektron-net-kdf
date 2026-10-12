@@ -3,8 +3,10 @@ use mm2_rpc::data::legacy::{AggregatedOrderbookEntry, OrderConfirmationsSettings
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 
-use super::{smart_fraction_fmt::{SmartFractPrecision, SmartFractionFmt},
-            OrderbookConfig};
+use super::{
+    smart_fraction_fmt::{SmartFractPrecision, SmartFractionFmt},
+    OrderbookConfig,
+};
 
 pub(super) fn cmp_bids(left: &&AggregatedOrderbookEntry, right: &&AggregatedOrderbookEntry) -> Ordering {
     let cmp = left.entry.price.cmp(&right.entry.price).reverse();

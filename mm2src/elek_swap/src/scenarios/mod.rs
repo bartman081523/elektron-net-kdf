@@ -12,7 +12,9 @@ use super::activation_scheme_db::init_activation_scheme;
 
 pub(super) use mm2_proc_mng::{get_status, start_process, stop_process};
 
-pub(super) async fn init(cfg_file: &str, coins_file: &str) { let _ = init_impl(cfg_file, coins_file).await; }
+pub(super) async fn init(cfg_file: &str, coins_file: &str) {
+    let _ = init_impl(cfg_file, coins_file).await;
+}
 
 async fn init_impl(cfg_file: &str, coins_file: &str) -> Result<()> {
     init_mm2_cfg(cfg_file)?;

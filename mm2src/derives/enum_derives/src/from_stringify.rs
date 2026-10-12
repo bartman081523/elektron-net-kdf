@@ -2,8 +2,8 @@ use crate::{get_attr_meta, CompileError, IdentCtx, MacroAttr};
 use proc_macro2::{Ident, TokenStream};
 use quote::__private::ext::RepToTokensExt;
 use quote::quote;
-use syn::NestedMeta::Lit;
 use syn::__private::TokenStream2;
+use syn::NestedMeta::Lit;
 use syn::{ExprPath, NestedMeta, Variant};
 
 impl CompileError {

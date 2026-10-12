@@ -262,19 +262,30 @@ impl Platform {
                         .await,
                 ),
                 Err(err) => {
-                    error!("Error {} on fee method detection, falling back to the daemon relay fee", err);
+                    error!(
+                        "Error {} on fee method detection, falling back to the daemon relay fee",
+                        err
+                    );
                     None
                 },
             },
             _ => match self
                 .rpc_client()
-                .estimate_fee_sat(decimals, &EstimateFeeMethod::Standard, &conf.estimate_fee_mode, n_blocks)
+                .estimate_fee_sat(
+                    decimals,
+                    &EstimateFeeMethod::Standard,
+                    &conf.estimate_fee_mode,
+                    n_blocks,
+                )
                 .compat()
                 .await
             {
                 Ok(fee) => Some(Ok(fee)),
                 Err(first_err) => {
-                    error!("Error {} on estimatefee with a fee mode, retrying without it", first_err);
+                    error!(
+                        "Error {} on estimatefee with a fee mode, retrying without it",
+                        first_err
+                    );
                     Some(
                         self.rpc_client()
                             .estimate_fee_sat(decimals, &EstimateFeeMethod::Standard, &None, n_blocks)

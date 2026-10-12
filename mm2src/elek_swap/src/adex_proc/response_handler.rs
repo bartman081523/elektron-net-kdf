@@ -1,4 +1,5 @@
-#[path = "response_handler/orderbook.rs"] mod orderbook;
+#[path = "response_handler/orderbook.rs"]
+mod orderbook;
 #[path = "response_handler/smart_fraction_fmt.rs"]
 mod smart_fraction_fmt;
 
@@ -7,8 +8,10 @@ pub(crate) use smart_fraction_fmt::SmartFractPrecision;
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use log::{error, info};
-use mm2_rpc::data::legacy::{BalanceResponse, CoinInitResponse, GetEnabledResponse, Mm2RpcResult, MmVersionResponse,
-                            OrderbookResponse, SellBuyResponse, Status};
+use mm2_rpc::data::legacy::{
+    BalanceResponse, CoinInitResponse, GetEnabledResponse, Mm2RpcResult, MmVersionResponse, OrderbookResponse,
+    SellBuyResponse, Status,
+};
 use serde_json::Value as Json;
 use std::cell::RefCell;
 use std::fmt::Debug;

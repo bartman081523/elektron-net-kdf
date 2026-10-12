@@ -23,7 +23,9 @@ pub(super) struct SlurpTransport {
 }
 
 impl SlurpTransport {
-    pub(super) fn new(rpc_uri: String) -> SlurpTransport { SlurpTransport { rpc_uri } }
+    pub(super) fn new(rpc_uri: String) -> SlurpTransport {
+        SlurpTransport { rpc_uri }
+    }
 }
 
 #[async_trait]

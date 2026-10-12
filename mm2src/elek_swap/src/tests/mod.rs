@@ -158,7 +158,7 @@ fn test_activation_scheme() {
     let scheme = get_activation_scheme().unwrap();
     let kmd_scheme = scheme.get_activation_method("KMD");
     let Ok(ActivationRequest::Electrum(electrum)) = kmd_scheme else {
-         panic!("Failed to get electrum scheme")
+        panic!("Failed to get electrum scheme")
     };
     assert_ne!(electrum.servers.len(), 0);
     assert!(scheme.get_activation_method("MORTY").is_err());

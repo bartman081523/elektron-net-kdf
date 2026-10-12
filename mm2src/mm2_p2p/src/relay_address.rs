@@ -128,7 +128,13 @@ impl WsRelayAddress {
             };
             let port: u16 = match rest.strip_prefix(':') {
                 Some(port_str) => port_str.parse().map_err(|_| ())?,
-                None if rest.is_empty() => if secure { 443 } else { 80 },
+                None if rest.is_empty() => {
+                    if secure {
+                        443
+                    } else {
+                        80
+                    }
+                },
                 None => return Err(()),
             };
             if port == 0 {
@@ -155,7 +161,7 @@ impl WsRelayAddress {
             Some((host, port)) => {
                 let port: u16 = port.parse().map_err(|_| ())?;
                 (host, port)
-            }
+            },
             None => (s, if secure { 443 } else { 80 }),
         };
         if port == 0 {
@@ -365,25 +371,33 @@ fn test_ws_relay_address_to_multiaddr() {
     // names resolve DUAL-STACK (`/dns/`, A+AAAA) so IPv6-only peers can
     // dial the federation edge.
     let seed = RelayAddress::from_str("wss://elektron-market.onrender.com:443").unwrap();
-    assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
-               "/dns/elektron-market.onrender.com/tcp/443/wss");
+    assert_eq!(
+        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        "/dns/elektron-market.onrender.com/tcp/443/wss"
+    );
 
     // a local bridge target rides the same mechanics without TLS
     let seed = RelayAddress::from_str("ws://127.0.0.1:10100").unwrap();
-    assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
-               "/ip4/127.0.0.1/tcp/10100/ws");
+    assert_eq!(
+        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        "/ip4/127.0.0.1/tcp/10100/ws"
+    );
 
     // IPv6 literals: the URI-standard bracket form dials `/ip6/`, with and
     // without an explicit port. Bare dual-colon literals stay rejected (see
     // `from_host_port` — the bracket form is the only unambiguous spelling).
     let seed = RelayAddress::from_str("ws://[::1]:10200").unwrap();
-    assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
-               "/ip6/::1/tcp/10200/ws");
+    assert_eq!(
+        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        "/ip6/::1/tcp/10200/ws"
+    );
     assert_eq!(seed.to_string(), "ws://[::1]:10200");
 
     let seed = RelayAddress::from_str("ws://[::1]").unwrap();
-    assert_eq!(seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
-               "/ip6/::1/tcp/80/ws");
+    assert_eq!(
+        seed.try_to_multiaddr(distributed.clone()).unwrap().to_string(),
+        "/ip6/::1/tcp/80/ws"
+    );
     assert_eq!(seed.to_string(), "ws://[::1]:80");
 
     for bare in ["ws://::1:8080", "ws://2001:db8::1", "ws://2001:db8::1:2"] {
@@ -392,8 +406,10 @@ fn test_ws_relay_address_to_multiaddr() {
 
     // netid-derived ports must NOT leak into the websocket form
     let seed = RelayAddress::from_str("ws://relay.host:10200").unwrap();
-    assert_eq!(seed.try_to_multiaddr(distributed).unwrap().to_string(),
-               "/dns/relay.host/tcp/10200/ws");
+    assert_eq!(
+        seed.try_to_multiaddr(distributed).unwrap().to_string(),
+        "/dns/relay.host/tcp/10200/ws"
+    );
 
     let seed = RelayAddress::from_str("ws://relay.host:10200").unwrap();
     assert!(seed.try_to_multiaddr(NetworkInfo::InMemory).is_err());

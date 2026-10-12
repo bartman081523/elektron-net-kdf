@@ -36,9 +36,7 @@ mod bridge;
 use hyper::{
     body::to_bytes as body_to_bytes,
     client::HttpConnector,
-    header::{
-        self, HeaderValue, ALLOW, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE,
-    },
+    header::{self, HeaderValue, ALLOW, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE},
     service::{make_service_fn, service_fn},
     Body, Client, Method, Request, Response, Server, StatusCode,
 };
@@ -185,7 +183,7 @@ fn parse_proxy_url(raw: &str) -> (String, u16) {
                 .parse()
                 .unwrap_or_else(|_| panic!("MM_WEB_PROXY_URL: bad port in {:?}", raw));
             (host, port)
-        }
+        },
         None => panic!("MM_WEB_PROXY_URL: host only, no port: {:?}", raw),
     };
     if host.is_empty() || host.contains(['/', '\\']) {
@@ -219,7 +217,7 @@ async fn proxy_rpc(rpc: &Client<HttpConnector>, proxy: &Proxy, req: Request<Body
     match val.as_object_mut() {
         Some(obj) => {
             obj.insert("userpass".to_string(), serde_json::Value::from(proxy.pass.as_str()));
-        }
+        },
         None => return bad_request("body must be a JSON object"),
     };
     let upstream = match Request::builder()
@@ -240,7 +238,7 @@ async fn proxy_rpc(rpc: &Client<HttpConnector>, proxy: &Proxy, req: Request<Body
                 out.headers_mut().insert(CONTENT_TYPE, ct.clone());
             }
             out
-        }
+        },
         Err(e) => bad_gateway(&e.to_string()),
     }
 }
@@ -270,7 +268,7 @@ async fn proxy_sse(rpc: &Client<HttpConnector>, proxy: &Proxy, req: &Request<Bod
                 }
             }
             out
-        }
+        },
         Err(e) => bad_gateway(&e.to_string()),
     }
 }
@@ -299,14 +297,18 @@ async fn healthz(rpc: &Client<HttpConnector>, proxy: &Proxy) -> Response<Body> {
                     .map(|v| v.get("result").is_some())
                     .unwrap_or(false);
             (
-                if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE },
+                if ok {
+                    StatusCode::OK
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                },
                 if ok {
                     "ok".to_string()
                 } else {
                     format!("kdf unhealthy: HTTP {} without result", parts.status.as_u16())
                 },
             )
-        }
+        },
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, format!("kdf unreachable: {}", e)),
     };
     let mut resp = Response::new(Body::from(format!("elek-web healthz: {}\n", note)));
@@ -319,8 +321,7 @@ fn not_allowed() -> Response<Body> {
         "only GET and HEAD are served; JSON-RPC goes to the kdf daemon, not here\n",
     ));
     *resp.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
-    resp.headers_mut()
-        .insert(ALLOW, HeaderValue::from_static("GET, HEAD"));
+    resp.headers_mut().insert(ALLOW, HeaderValue::from_static("GET, HEAD"));
     base_headers(&mut resp, "text/plain; charset=utf-8");
     resp
 }
@@ -328,11 +329,7 @@ fn not_allowed() -> Response<Body> {
 async fn send_file(path: PathBuf, is_head: bool) -> Response<Body> {
     match tokio::fs::read(&path).await {
         Ok(bytes) => {
-            let mut resp = Response::new(if is_head {
-                Body::empty()
-            } else {
-                Body::from(bytes)
-            });
+            let mut resp = Response::new(if is_head { Body::empty() } else { Body::from(bytes) });
             base_headers(&mut resp, content_type(&path));
             if is_head {
                 if let Ok(meta) = tokio::fs::metadata(&path).await {
@@ -342,7 +339,7 @@ async fn send_file(path: PathBuf, is_head: bool) -> Response<Body> {
                 }
             }
             resp
-        }
+        },
         Err(_) => not_found(),
     }
 }
@@ -403,7 +400,7 @@ async fn handle(
                     None => not_found(),
                 }
             }
-        }
+        },
         Method::POST => match (&proxy, path.as_str()) {
             (Some(p), RPC_PATH) | (Some(p), "/rpc/") => proxy_rpc(&rpc, p, req).await,
             _ => not_allowed(),
@@ -443,28 +440,30 @@ async fn main() {
                 "elek-web: proxy mode -> JSON-RPC + SSE under {} (same origin), rpc password injected server-side, daemon http://{}:{}",
                 RPC_PATH, host, port
             );
-            Some(Proxy { upstream: format!("{}:{}", host, port), pass })
-        }
+            Some(Proxy {
+                upstream: format!("{}:{}", host, port),
+                pass,
+            })
+        },
         (Ok(_), Ok(_)) => {
             println!("elek-web: MM_WEB_PROXY_URL/MM_WEB_RPC_PASS pair incomplete -> proxy mode off");
             None
-        }
+        },
         _ => None,
     };
 
     let rpc: Client<HttpConnector> = Client::new();
-    let auto_config: Option<(String, String)> =
-        match (env::var("MM_WEB_RPC_URL"), env::var("MM_WEB_RPC_PASS")) {
-            (Ok(url), Ok(pass)) => {
-                let url = url.trim().trim_end_matches('/').to_string();
-                if url.is_empty() {
-                    None
-                } else {
-                    Some((url, pass))
-                }
+    let auto_config: Option<(String, String)> = match (env::var("MM_WEB_RPC_URL"), env::var("MM_WEB_RPC_PASS")) {
+        (Ok(url), Ok(pass)) => {
+            let url = url.trim().trim_end_matches('/').to_string();
+            if url.is_empty() {
+                None
+            } else {
+                Some((url, pass))
             }
-            _ => None,
-        };
+        },
+        _ => None,
+    };
 
     // Unified price estimate: elek-web serves the electrs FX rates file
     // same-origin at /fx/rates.json (electrs = single point of responsibility,
@@ -486,9 +485,8 @@ async fn main() {
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .map(|v| {
-            v.parse().unwrap_or_else(|e| {
-                panic!("MM_WEB_P2P_BRIDGE must parse as ip:port, got {:?}: {}", v, e)
-            })
+            v.parse()
+                .unwrap_or_else(|e| panic!("MM_WEB_P2P_BRIDGE must parse as ip:port, got {:?}: {}", v, e))
         });
 
     match &proxy {
@@ -523,9 +521,7 @@ async fn main() {
                 let proxy = proxy.clone();
                 let rpc = rpc.clone();
                 let bridge = bridge.clone();
-                async move {
-                    handle(req, root, auto_config, fx_rates, proxy, rpc, bridge).await
-                }
+                async move { handle(req, root, auto_config, fx_rates, proxy, rpc, bridge).await }
             }))
         }
     });
@@ -576,8 +572,8 @@ fn print_bridge_banner(bridge: &Option<SocketAddr>) {
             "elek-web: p2p bridge enabled -> websocket upgrades spliced to the kdf relay plain-ws listener at {}",
             addr
         ),
-        None => println!(
-            "elek-web: p2p bridge disabled (MM_WEB_P2P_BRIDGE unset) -> websocket upgrades are not served"
-        ),
+        None => {
+            println!("elek-web: p2p bridge disabled (MM_WEB_P2P_BRIDGE unset) -> websocket upgrades are not served")
+        },
     }
 }

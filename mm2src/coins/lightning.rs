@@ -47,8 +47,7 @@ use lightning::chain::keysinterface::{KeysInterface, KeysManager, Recipient};
 use lightning::ln::channelmanager::{ChannelDetails, MIN_FINAL_CLTV_EXPIRY};
 use lightning::ln::{PaymentHash, PaymentPreimage};
 use lightning::routing::router::{
-    DefaultRouter, PaymentParameters, RouteParameters, Router as RouterTrait,
-    DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
+    DefaultRouter, PaymentParameters, RouteParameters, Router as RouterTrait, DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
 };
 use lightning::util::ser::{Readable, Writeable};
 use lightning_background_processor::BackgroundProcessor;
@@ -639,8 +638,8 @@ impl SwapOps for LightningCoin {
         // whole swap locktime in blocks) on top of LDK's hop-delta allowance, else
         // find_route preemptively refuses. The maker is the side that reveals the
         // secret/preimage, but that doesn't lift the CLTV requirement of the HTLC.
-        let max_total_cltv_expiry_delta = (invoice.min_final_cltv_expiry() as u32)
-            + DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA;
+        let max_total_cltv_expiry_delta =
+            (invoice.min_final_cltv_expiry() as u32) + DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA;
         let payment = try_tx_s!(self.pay_invoice(invoice, Some(max_total_cltv_expiry_delta)).await);
         Ok(payment.payment_hash.into())
     }
@@ -654,8 +653,8 @@ impl SwapOps for LightningCoin {
         // Same budgeting as the maker payment: the demanded final CLTV expiry of
         // the invoice plus the default hop-delta allowance. Estimate-only budgets
         // fail when the final equals the budget (find_route refuses on <=).
-        let max_total_cltv_expiry_delta = (invoice.min_final_cltv_expiry() as u32)
-            + DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA;
+        let max_total_cltv_expiry_delta =
+            (invoice.min_final_cltv_expiry() as u32) + DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA;
         // Todo: The path/s used is already logged when PaymentPathSuccessful/PaymentPathFailed events are fired, it might be better to save it to the DB and retrieve it with the payment info.
         let payment = try_tx_s!(self.pay_invoice(invoice, Some(max_total_cltv_expiry_delta)).await);
         Ok(payment.payment_hash.into())

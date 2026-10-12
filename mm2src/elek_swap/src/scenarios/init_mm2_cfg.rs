@@ -9,8 +9,9 @@ use std::net::Ipv4Addr;
 use std::ops::Not;
 use std::path::Path;
 
-use super::inquire_extentions::{InquireOption, DEFAULT_DEFAULT_OPTION_BOOL_FORMATTER, DEFAULT_OPTION_BOOL_FORMATTER,
-                                OPTION_BOOL_PARSER};
+use super::inquire_extentions::{
+    InquireOption, DEFAULT_DEFAULT_OPTION_BOOL_FORMATTER, DEFAULT_OPTION_BOOL_FORMATTER, OPTION_BOOL_PARSER,
+};
 use crate::helpers;
 use crate::logging::error_anyhow;
 

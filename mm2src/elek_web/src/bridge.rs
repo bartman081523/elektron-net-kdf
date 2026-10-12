@@ -63,10 +63,7 @@ pub(crate) fn is_ws_upgrade(req: &Request<Body>) -> bool {
     if req.headers().get("sec-websocket-key").is_none() {
         return false;
     }
-    req.headers()
-        .get("sec-websocket-version")
-        .and_then(|v| v.to_str().ok())
-        == Some("13")
+    req.headers().get("sec-websocket-version").and_then(|v| v.to_str().ok()) == Some("13")
 }
 
 /// The upgrade request replayed to the relay: the client's own path and
@@ -91,9 +88,7 @@ fn relay_upgrade_request(req: &Request<Body>, relay_host: &str) -> Vec<u8> {
         if is_handled {
             continue;
         }
-        out.extend_from_slice(
-            format!("{}: {}\r\n", name, value.to_str().unwrap_or_default()).as_bytes(),
-        );
+        out.extend_from_slice(format!("{}: {}\r\n", name, value.to_str().unwrap_or_default()).as_bytes());
     }
     out.extend_from_slice(b"\r\n");
     out
@@ -160,7 +155,7 @@ pub(crate) async fn splice(mut req: Request<Body>, bridge_addr: SocketAddr) -> R
         Ok(stream) => stream,
         Err(e) => {
             return bad_gateway(&format!("relay unreachable at {}: {}", bridge_addr, e));
-        }
+        },
     };
     if let Err(e) = relay.write_all(&relay_upgrade_request(&req, &relay_host)).await {
         return bad_gateway(&format!("relay handshake write failed: {}", e));
@@ -201,7 +196,7 @@ pub(crate) async fn splice(mut req: Request<Body>, bridge_addr: SocketAddr) -> R
                     ),
                     Err(e) => eprintln!("elek-web: ws bridge pump error: {}", e),
                 }
-            }
+            },
             Err(e) => eprintln!("elek-web: ws upgrade never completed: {}", e),
         }
     });

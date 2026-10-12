@@ -5976,8 +5976,8 @@ pub fn address_by_coin_conf_and_pubkey_str(
             // Orderbook items of lightning coins carry the node-id (compressed pubkey
             // hex) as their pubkey (LightningCoin::get_public_key), so the address
             // equals the pubkey, mirroring LightningCoin::address_from_pubkey.
-            let pubkey_bytes = hex::decode(pubkey)
-                .map_err(|e| ERRL!("Invalid lightning node pubkey '{}': {}", pubkey, e))?;
+            let pubkey_bytes =
+                hex::decode(pubkey).map_err(|e| ERRL!("Invalid lightning node pubkey '{}': {}", pubkey, e))?;
             if pubkey_bytes.len() != 33 {
                 return ERR!(
                     "Expected a 33-byte compressed lightning node pubkey, got {} bytes",
