@@ -3,10 +3,13 @@
 # elektrond testnet genesis chain + miner loop + electrs (Signet stand-in) with
 # the FX wiring into the market daemon's orderbook.
 #
-# All addresses loopback; the container has no host dependencies and NO custody:
-# the miner address belongs to the infra faucet wallet only (testnet supply for
-# client wallets in e2e runs) — the market/trader daemons stay at zero and are
-# never an order participant.
+# All infra addresses loopback EXCEPT electrs electrum :50005, which binds all
+# interfaces: client wallets (host kdfs, Android via socat/LAN) reach the
+# indexer over the docker bridge — a loopback-only bind refuses them at enable
+# (utxo_common transport errors). The container has no host dependencies and NO
+# custody: the miner address belongs to the infra faucet wallet only (testnet
+# supply for client wallets in e2e runs) — the market/trader daemons stay at
+# zero and are never an order participant.
 #
 # Called from entrypoint AFTER setup_env.py (the kdf rpc password exists then)
 # and BEFORE the kdf daemons start. Returns once electrum :50005 answers;
@@ -66,7 +69,12 @@ EOF
 
 if ! node_ready; then
     echo "  infra: starting elektrond testnet ..."
-    "$ELEKTROND_BIN" -testnet -datadir="$DATA/etn1"
+    # RPC headroom: with default 4 rpcworkqueue the node wedges at 100% CPU once
+    # concurrent callers overlay (electrs polling + miner loop) — then every
+    # electrs instance dies ~30 s after start with EAGAIN (os error 11) and the
+    # JSON-RPC answers with empty bodies. 8 threads / 128 queue absorb that.
+    "$ELEKTROND_BIN" -testnet -datadir="$DATA/etn1" \
+        -rpcthreads=8 -rpcworkqueue=128
 fi
 
 i=0
@@ -124,8 +132,20 @@ EOF
 if port_up 50005; then
     echo "  infra: electrs already listening on 50005"
 else
-    ("$ELECTRS_BIN" --conf "$DATA/electrs-tn/electrs-tn.toml" \
-        > "$DATA/logs/electrs-tn.log" 2>&1 &)
+    # Respawn supervisor rather than a one-shot spawn: electrs exits whenever
+    # the daemon RPC hiccups (EAGAIN) and the container would then run with
+    # no indexer at all. Electrs runs FOREGROUND inside the loop, so exactly
+    # one instance exists; the 15 s tick gives a dead port a bounded gap.
+    (
+        while :; do
+            if ! port_up 50005; then
+                "$ELECTRS_BIN" --conf "$DATA/electrs-tn/electrs-tn.toml" \
+                    >> "$DATA/logs/electrs-tn.log" 2>&1
+            fi
+            sleep 15
+        done
+    ) &
+    echo $! > "$DATA/electrs-respawn.pid"
 fi
 
 i=0
@@ -145,11 +165,21 @@ echo "  infra: electrs electrum rpc is up on 50005"
 # ~33.5M hashes per block while the default sweep is capped at 1e6 attempts —
 # and the daemon's generateBlocks breaks SILENTLY on a failed sweep.
 if [ "${MM_LOCAL_TESTNET_MINER:-1}" = "1" ]; then
+    # One generatetoaddress per round via PLAIN curl, NOT jrpc(): jrpc carries
+    # --max-time 5, which abandons the CLIENT after 5 s while the server keeps
+    # mining for ~1-2 min at testnet difficulty — a new call fired every tick
+    # flooded the RPC work queue and wedged elektrond (electrs died of EAGAIN,
+    # miner log showed nothing). With a blocking call the loop serializes
+    # naturally; the interval applies AFTER the block completes.
     while :; do
-        if jrpc generatetoaddress "[1,\"$FAUCET_ADDR\",1000000000]" | grep -q '"error":null'; then
+        if timeout "${MM_LOCAL_TESTNET_MINE_TIMEOUT:-600}" curl -s \
+            --user "$NODE_USER:$NODE_PASS" \
+            -H 'content-type: text/plain;' "http://127.0.0.1:18332" \
+            -d "{\"jsonrpc\":\"1.0\",\"id\":\"e\",\"method\":\"generatetoaddress\",\"params\":[1,\"$FAUCET_ADDR\",1000000000]}" \
+            | grep -q '"error":null'; then
             printf '%s mined\n' "$(jrpc getblockcount '[]' | python3 -c 'import json,sys;print(json.load(sys.stdin)["result"])')" >> "$DATA/logs/miner.log"
         fi
-        sleep "${MM_LOCAL_TESTNET_MINE_INTERVAL:-5}"
+        sleep "${MM_LOCAL_TESTNET_MINE_INTERVAL:-30}"
     done &
     echo $! > "$DATA/miner-loop.pid"
     echo "  infra: miner loop running (pid $(cat "$DATA/miner-loop.pid"))"
