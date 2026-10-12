@@ -46,12 +46,55 @@ RUN --mount=type=cache,target=/src/target \
     && mkdir -p /out \
     && cp target/release/kdf target/release/elek-web /out/
 
+# ---------------------------------------------------------------------------
+# A1b: elektrond (the Elektron fork node) built FROM SOURCE in-image.
+# Sources: bartman081523/elektron-net branch fork-main (public). Built on the
+# same Arch toolchain it runs on, so no glibc mismatch. Only the daemon is
+# needed (the miner loop mines via RPC; no CUDA miner binary in the image).
+# ---------------------------------------------------------------------------
+FROM archlinux:base AS elektron-build
+RUN pacman -Syu --noconfirm --needed \
+        base-devel cmake ninja git gcc \
+        boost libevent sqlite \
+    && rm -rf /var/cache/pacman/pkg /var/lib/pacman/sync
+RUN git clone --depth 1 --branch fork-main \
+        https://github.com/bartman081523/elektron-net.git /src
+RUN mkdir -p /out \
+    && cmake -S /src -B /build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_BITCOIN_BIN=ON -DBUILD_DAEMON=ON -DBUILD_CLI=OFF \
+        -DBUILD_GUI=OFF -DBUILD_WALLET_TOOL=OFF -DBUILD_UTIL=OFF \
+        -DBUILD_TX=OFF -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF \
+        -DBUILD_FUZZ_BINARY=OFF -DBUILD_FOR_FUZZING=OFF \
+        -DBUILD_KERNEL_LIB=OFF -DENABLE_IPC=OFF \
+    && cmake --build /build --target elektrond -j"$(nproc)" \
+    && cp /build/bin/elektrond /out/
+
+# ---------------------------------------------------------------------------
+# A1b: electrs (fork indexer) built FROM SOURCE in-image on a Debian rust
+# toolchain (rocksdb needs a C++ toolchain; runtime glibc is newer and
+# forward-compatible).
+# ---------------------------------------------------------------------------
+FROM rust:1-slim-bookworm AS electrs-build
+ENV RUSTC_BOOTSTRAP=1 CARGO_TERM_COLOR=never
+WORKDIR /src
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git build-essential clang \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch elektron/61-market-api \
+        https://github.com/bartman081523/elektron-net-electrs.git /src
+RUN --mount=type=cache,target=/src/target \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release \
+    && mkdir -p /out \
+    && cp /src/target/release/electrs /out/
+
 # The runtime base is Arch (glibc 2.44, libstdc++ GLIBCXX_3.4.35) because the
-# node binaries are built on the Arch host toolchain: elektrond requires
+# node binaries are built ON ARCH toolchains in-image (A1b): elektrond requires
 # GLIBC_2.38 + GLIBCXX_3.4.35 + CXXABI_1.3.15 — bookworm (glibc 2.36, gcc 12)
-# cannot provide those. kdf/elek-web (built on bookworm glibc 2.36) are
-# forward-compatible on the newer glibc. A1b (building elektrond from source
-# in-image) will eventually allow a stable-Debian runtime again.
+# cannot provide those, the same-Arch in-image build can. kdf/elek-web (built on
+# bookworm glibc 2.36) are forward-compatible on the newer glibc.
 FROM archlinux:base
 RUN pacman -Syu --noconfirm \
         ca-certificates python curl \
@@ -59,10 +102,10 @@ RUN pacman -Syu --noconfirm \
     && rm -rf /var/cache/pacman/pkg /var/lib/pacman/sync
 COPY --from=builder /out/kdf /usr/local/bin/kdf
 COPY --from=builder /out/elek-web /usr/local/bin/elek-web
-# Node binaries of the self-contained testnet infra (extra build context:
-# --build-context bin=<staging dir>). CI builds them from source (A1b).
-COPY --from=bin elektrond /usr/local/bin/elektrond
-COPY --from=bin electrs /usr/local/bin/electrs
+# Node binaries of the self-contained testnet infra are built IN-IMAGE (A1b) —
+# no extra build context needed anymore; both stages cache-compat in BuildKit.
+COPY --from=elektron-build /out/elektrond /usr/local/bin/elektrond
+COPY --from=electrs-build /out/electrs /usr/local/bin/electrs
 COPY web /app/web
 COPY coins /app/coins
 COPY docker /app/docker
