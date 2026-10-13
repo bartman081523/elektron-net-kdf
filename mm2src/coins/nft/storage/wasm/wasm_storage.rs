@@ -32,7 +32,7 @@ fn take_nft_according_to_paging_opts(
     page_number: Option<NonZeroUsize>,
 ) -> WasmNftCacheResult<NftList> {
     let total_count = nfts.len();
-    nfts.sort_by(|a, b| b.block_number.cmp(&a.block_number));
+    nfts.sort_by_key(|a| std::cmp::Reverse(a.block_number));
     let (offset, limit) = get_offset_limit(max, limit, page_number, total_count);
     Ok(NftList {
         nfts: nfts.into_iter().skip(offset).take(limit).collect(),
@@ -68,7 +68,7 @@ fn take_transfers_according_to_paging_opts(
     page_number: Option<NonZeroUsize>,
 ) -> WasmNftCacheResult<NftsTransferHistoryList> {
     let total_count = transfers.len();
-    transfers.sort_by(|a, b| b.block_timestamp.cmp(&a.block_timestamp));
+    transfers.sort_by_key(|a| std::cmp::Reverse(a.block_timestamp));
     let (offset, limit) = get_offset_limit(max, limit, page_number, total_count);
     Ok(NftsTransferHistoryList {
         transfer_history: transfers.into_iter().skip(offset).take(limit).collect(),

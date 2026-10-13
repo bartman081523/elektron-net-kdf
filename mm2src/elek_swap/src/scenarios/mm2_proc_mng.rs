@@ -14,7 +14,6 @@ mod reexport {
     pub(super) use std::mem;
     pub(super) use std::mem::size_of;
     pub(super) use std::ptr::null;
-    pub(super) use std::u32;
     pub(super) use winapi::um::processthreadsapi::{
         CreateProcessA, OpenProcess, TerminateProcess, PROCESS_INFORMATION, STARTUPINFOA,
     };
@@ -149,7 +148,7 @@ fn start_process_impl(mm2_binary: PathBuf) {
     let result = unsafe {
         CreateProcessA(
             null(),
-            program.into_raw() as *mut i8,
+            program.into_raw(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             0,

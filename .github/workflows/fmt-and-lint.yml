@@ -58,4 +58,8 @@ jobs:
         uses: ./.github/actions/build-cache
 
       - name: clippy lint
-        run: cargo clippy --target wasm32-unknown-unknown -- --D warnings
+        # elek-swap and elek-web are host-only binaries (elektron fork: the
+        # local-market CLI and the web/relay server); they are never built for
+        # wasm and do not compile there (tokio/hyper etc.), so they are
+        # excluded from the wasm clippy run.
+        run: cargo clippy --workspace --target wasm32-unknown-unknown --exclude elek-swap --exclude elek-web -- --D warnings

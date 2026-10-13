@@ -72,7 +72,7 @@ impl HistoryId {
 
 impl std::fmt::Display for HistoryId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", &self.0)
+        write!(f, "{}", self.0)
     }
 }
 
