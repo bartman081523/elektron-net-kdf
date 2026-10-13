@@ -373,6 +373,7 @@ async fn send_file(path: PathBuf, is_head: bool) -> Response<Body> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle(
     req: Request<Body>,
     root: Option<PathBuf>,
