@@ -169,7 +169,6 @@ jobs:
           - name: SLP
             features: docker-tests-slp
             skip-args: ''
-            skip-args: ''
             compose-profiles: "--profile slp"
             timeout: 45
             needs-zcash-params: true
@@ -207,6 +206,7 @@ jobs:
           # Ordermatching tests - UTXO order lifecycle
           - name: Ordermatch (UTXO)
             features: docker-tests-ordermatch
+            skip-args: ''
             compose-profiles: "--profile utxo"
             timeout: 60
             needs-zcash-params: true
@@ -217,7 +217,6 @@ jobs:
           # UTXO swap protocol tests
           - name: Swaps (UTXO)
             features: docker-tests-swaps
-            skip-args: ''
             skip-args: ''
             compose-profiles: "--profile utxo"
             timeout: 60
